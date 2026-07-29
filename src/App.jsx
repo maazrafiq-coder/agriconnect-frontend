@@ -11,6 +11,7 @@ import { TestingPage, TransportPage } from './pages/ServicePages';
 import WarehousePage from './pages/WarehousePage';
 import SellerDashboard  from './pages/SellerDashboard';
 import BuyerDashboard   from './pages/BuyerDashboard';
+import AdminDashboard   from './pages/AdminDashboard';
 
 // Backend UserRole enum values that count as "seller" for route-guard
 // purposes. adaptUser() lowercases the raw enum (TRADER -> 'trader'),
@@ -19,10 +20,11 @@ import BuyerDashboard   from './pages/BuyerDashboard';
 const SELLER_ROLES = ['trader', 'farmer', 'miller'];
 
 // Protected route wrapper
-function ProtectedRoute({ children, requireSeller }) {
+function ProtectedRoute({ children, requireSeller, requireAdmin }) {
   const { user, loading } = useAuth();
   if (loading) return null; // wait for session rehydration before deciding
   if (!user) return <Navigate to="/" replace />;
+  if (requireAdmin && user.role !== 'admin') return <Navigate to="/" replace />;
   if (requireSeller && !SELLER_ROLES.includes(user.role)) return <Navigate to="/" replace />;
   return children;
 }
@@ -42,6 +44,7 @@ function AppInner() {
         <Route path="/warehouse"   element={<WarehousePage />} />
         <Route path="/seller"      element={<ProtectedRoute requireSeller><SellerDashboard /></ProtectedRoute>} />
         <Route path="/buyer"       element={<ProtectedRoute><BuyerDashboard /></ProtectedRoute>} />
+        <Route path="/admin"       element={<ProtectedRoute requireAdmin><AdminDashboard /></ProtectedRoute>} />
         <Route path="*"            element={<Navigate to="/" replace />} />
       </Routes>
 

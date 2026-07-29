@@ -178,9 +178,9 @@ export function adaptOffer(o) {
   return {
     id:           o.id,
     productId:    o.productId,
-    productName:  o.product?.name || '',
+    product:      o.product?.name || '',
     productUnit:  o.product?.unit || '',
-    askingPrice:  Number(o.product?.askingPrice || 0),
+    asking:       Number(o.product?.askingPrice || 0),
     buyer:        o.buyer?.profile?.fullName || '',
     buyerId:      o.buyerId,
     qty:          o.quantity,

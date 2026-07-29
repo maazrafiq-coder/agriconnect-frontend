@@ -21,14 +21,14 @@ const MOCK_TESTING = [
 export default function BuyerDashboard() {
   const navigate = useNavigate();
   const [tab, setTab] = useState('overview');
-  const [ORDERS, setORDERS] = useState(adaptOrders(MOCK_ORDERS));
+  const [ORDERS, setORDERS] = useState(MOCK_ORDERS);
   const [TESTING, setTESTING] = useState(MOCK_TESTING);
   const [savedProducts, setSavedProducts] = useState([]);
 
   useEffect(() => {
     apiGetOrders('buyer')
       .then(data => setORDERS(adaptOrders(Array.isArray(data) ? data : [])))
-      .catch(() => setORDERS(adaptOrders(MOCK_ORDERS)));
+      .catch(() => setORDERS(MOCK_ORDERS));
 
     apiGetMyTestingRequests('requester')
       .then(data => setTESTING(Array.isArray(data) && data.length ? data : MOCK_TESTING))
@@ -118,7 +118,7 @@ export default function BuyerDashboard() {
             <Btn variant="secondary" size="sm" onClick={() => navigate('/marketplace')}>Browse More →</Btn>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(240px,1fr))', gap: 14 }}>
-            {(savedProducts.length > 0 ? savedProducts : adaptProducts(PRODUCTS.slice(0, 3))).map(p => <ProductCard key={p.id} product={p} />)}
+            {(savedProducts.length > 0 ? savedProducts : PRODUCTS.slice(0, 3)).map(p => <ProductCard key={p.id} product={p} />)}
           </div>
         </div>
       )}

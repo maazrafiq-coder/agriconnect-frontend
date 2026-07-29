@@ -230,8 +230,11 @@ export async function apiAcceptOffer(offerId) {
   return apiFetch(`/offers/${offerId}/accept`, { method: 'PATCH' });
 }
 
-export async function apiRejectOffer(offerId) {
-  return apiFetch(`/offers/${offerId}/reject`, { method: 'PATCH' });
+export async function apiRejectOffer(offerId, reason) {
+  return apiFetch(`/offers/${offerId}/reject`, {
+    method: 'PATCH',
+    body: JSON.stringify({ reason }),
+  });
 }
 
 export async function apiCounterOffer(offerId, { counterPrice, counterMessage }) {
@@ -372,4 +375,146 @@ export async function apiUpdateTracking(requestId, data) {
     method: 'PATCH',
     body: JSON.stringify(data),
   });
+}
+
+// ─── ADMIN ─────────────────────────────────────────────────────────────────────
+export async function apiAdminGetUsers(params = {}) {
+  const qs = new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v))).toString();
+  return apiFetch(`/users/admin/list${qs ? `?${qs}` : ''}`);
+}
+
+export async function apiAdminUpdateKyc(userId, status, note) {
+  return apiFetch(`/users/admin/${userId}/kyc`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status, note }),
+  });
+}
+
+export async function apiAdminSetUserActive(userId, isActive) {
+  return apiFetch(`/users/admin/${userId}/active`, {
+    method: 'PATCH',
+    body: JSON.stringify({ isActive }),
+  });
+}
+
+export async function apiAdminGetProducts(params = {}) {
+  const qs = new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v))).toString();
+  return apiFetch(`/products/admin/all${qs ? `?${qs}` : ''}`);
+}
+
+export async function apiAdminRemoveProduct(productId, reason) {
+  return apiFetch(`/products/admin/${productId}/remove`, {
+    method: 'PATCH',
+    body: JSON.stringify({ reason }),
+  });
+}
+
+export async function apiAdminRestoreProduct(productId) {
+  return apiFetch(`/products/admin/${productId}/restore`, { method: 'PATCH' });
+}
+
+export async function apiAdminGetOrders(params = {}) {
+  const qs = new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v))).toString();
+  return apiFetch(`/orders/admin${qs ? `?${qs}` : ''}`);
+}
+
+export async function apiAdminResolveDispute(orderId, resolution, note) {
+  return apiFetch(`/orders/admin/${orderId}/resolve-dispute`, {
+    method: 'PATCH',
+    body: JSON.stringify({ resolution, note }),
+  });
+}
+
+export async function apiAdminGetWarehouses() {
+  return apiFetch('/warehouse/admin/all');
+}
+
+export async function apiAdminVerifyWarehouse(warehouseId, verified) {
+  return apiFetch(`/warehouse/admin/${warehouseId}/verify`, {
+    method: 'PATCH',
+    body: JSON.stringify({ verified }),
+  });
+}
+
+// ─── CATEGORIES ─────────────────────────────────────────────────────────────────
+export async function apiGetCategories() {
+  return apiFetch('/categories');
+}
+
+export async function apiAdminGetCategories() {
+  return apiFetch('/categories/admin/all');
+}
+
+export async function apiAdminCreateCategory({ name, icon, description, sortOrder }) {
+  return apiFetch('/categories/admin', {
+    method: 'POST',
+    body: JSON.stringify({ name, icon, description, sortOrder }),
+  });
+}
+
+export async function apiAdminUpdateCategory(id, data) {
+  return apiFetch(`/categories/admin/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function apiAdminDeactivateCategory(id) {
+  return apiFetch(`/categories/admin/${id}/deactivate`, { method: 'PATCH' });
+}
+
+export async function apiAdminReactivateCategory(id) {
+  return apiFetch(`/categories/admin/${id}/reactivate`, { method: 'PATCH' });
+}
+
+// ─── CITIES ─────────────────────────────────────────────────────────────────────
+export async function apiGetCities(province) {
+  const qs = province ? `?province=${encodeURIComponent(province)}` : '';
+  return apiFetch(`/cities${qs}`);
+}
+
+export async function apiAdminGetCities() {
+  return apiFetch('/cities/admin/all');
+}
+
+export async function apiAdminCreateCity({ name, province, sortOrder }) {
+  return apiFetch('/cities/admin', { method: 'POST', body: JSON.stringify({ name, province, sortOrder }) });
+}
+
+export async function apiAdminUpdateCity(id, data) {
+  return apiFetch(`/cities/admin/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+}
+
+export async function apiAdminDeactivateCity(id) {
+  return apiFetch(`/cities/admin/${id}/deactivate`, { method: 'PATCH' });
+}
+
+export async function apiAdminReactivateCity(id) {
+  return apiFetch(`/cities/admin/${id}/reactivate`, { method: 'PATCH' });
+}
+
+// ─── UNITS ──────────────────────────────────────────────────────────────────────
+export async function apiGetUnits(categorySlug) {
+  const qs = categorySlug ? `?category=${encodeURIComponent(categorySlug)}` : '';
+  return apiFetch(`/units${qs}`);
+}
+
+export async function apiAdminGetUnits() {
+  return apiFetch('/units/admin/all');
+}
+
+export async function apiAdminCreateUnit({ name, categoryId, sortOrder }) {
+  return apiFetch('/units/admin', { method: 'POST', body: JSON.stringify({ name, categoryId, sortOrder }) });
+}
+
+export async function apiAdminUpdateUnit(id, data) {
+  return apiFetch(`/units/admin/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+}
+
+export async function apiAdminDeactivateUnit(id) {
+  return apiFetch(`/units/admin/${id}/deactivate`, { method: 'PATCH' });
+}
+
+export async function apiAdminReactivateUnit(id) {
+  return apiFetch(`/units/admin/${id}/reactivate`, { method: 'PATCH' });
 }

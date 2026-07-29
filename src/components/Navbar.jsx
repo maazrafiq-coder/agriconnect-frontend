@@ -58,10 +58,10 @@ export default function Navbar() {
           {user ? (
             <>
               <button
-                onClick={() => navigate(SELLER_ROLES.includes(user.role) ? '/seller' : '/buyer')}
+                onClick={() => navigate(user.role === 'admin' ? '/admin' : SELLER_ROLES.includes(user.role) ? '/seller' : '/buyer')}
                 style={{ background: 'rgba(116,198,157,0.15)', border: '1px solid rgba(116,198,157,0.3)', color: T.mint, padding: '7px 14px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 12, fontFamily: 'inherit' }}
               >
-                {SELLER_ROLES.includes(user.role) ? '📦' : '🛒'} My Portal
+                {user.role === 'admin' ? '🔐' : SELLER_ROLES.includes(user.role) ? '📦' : '🛒'} My Portal
               </button>
               <button
                 onClick={logout}

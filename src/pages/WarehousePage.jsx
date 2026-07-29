@@ -587,19 +587,19 @@ const WarehouseDetailModal = ({ w, onClose, onBook }) => (
 // ─── MAIN MODULE ──────────────────────────────────────────────────────────────
 export default function WarehouseModule() {
   const [tab, setTab] = useState('browse');
-  const [WAREHOUSES, setWAREHOUSES] = useState(adaptWarehouses(MOCK_WAREHOUSES));
-  const [MY_RECEIPTS, setMY_RECEIPTS] = useState(adaptReceipts(MOCK_RECEIPTS));
+  const [WAREHOUSES, setWAREHOUSES] = useState(MOCK_WAREHOUSES);
+  const [MY_RECEIPTS, setMY_RECEIPTS] = useState(MOCK_RECEIPTS);
   const [loadingWarehouses, setLoadingWarehouses] = useState(true);
 
   useEffect(() => {
     apiGetWarehouses()
       .then(data => setWAREHOUSES(adaptWarehouses(Array.isArray(data) ? data : [])))
-      .catch(() => setWAREHOUSES(adaptWarehouses(MOCK_WAREHOUSES)))
+      .catch(() => setWAREHOUSES(MOCK_WAREHOUSES))
       .finally(() => setLoadingWarehouses(false));
 
     apiGetMyReceipts()
       .then(data => setMY_RECEIPTS(adaptReceipts(Array.isArray(data) ? data : [])))
-      .catch(() => setMY_RECEIPTS(adaptReceipts(MOCK_RECEIPTS)));
+      .catch(() => setMY_RECEIPTS(MOCK_RECEIPTS));
   }, []);
   const [filter, setFilter] = useState({ type:'All', province:'All', commodity:'All', search:'' });
   const [bookingWarehouse, setBookingWarehouse] = useState(null);

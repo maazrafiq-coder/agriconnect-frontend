@@ -21,6 +21,7 @@ export function LoginModal() {
     buyer:       { phone: '0300-2222222', password: 'Buyer@123' },
     seller:      { phone: '0300-1111111', password: 'Seller@123' },
     transporter: { phone: '0300-5555555', password: 'Transport@123' },
+    admin:       { phone: '0300-0000000', password: 'Admin@123' },
   };
 
   const handleLogin = async () => {
@@ -36,7 +37,7 @@ export function LoginModal() {
       loginWithUser(adapted);
       closeModal();
       const SELLER_ROLES = ['trader', 'farmer', 'miller'];
-      navigate(SELLER_ROLES.includes(adapted.role) ? '/seller' : '/buyer');
+      navigate(adapted.role === 'admin' ? '/admin' : SELLER_ROLES.includes(adapted.role) ? '/seller' : '/buyer');
     } catch (err) {
       setError(err.message || 'Login failed. Check your credentials.');
     } finally {
@@ -49,7 +50,7 @@ export function LoginModal() {
       <div style={{ marginBottom: 16 }}>
         <div style={{ fontSize: 11, fontWeight: 700, color: T.muted, marginBottom: 8, letterSpacing: 0.5 }}>LOGIN AS</div>
         <div style={{ display: 'flex', gap: 8 }}>
-          {[['buyer', '🛒 Buyer'], ['seller', '🌾 Seller'], ['transporter', '🚛 Transport']].map(([r, l]) => (
+          {[['buyer', '🛒 Buyer'], ['seller', '🌾 Seller'], ['transporter', '🚛 Transport'], ['admin', '🔐 Admin']].map(([r, l]) => (
             <button key={r} onClick={() => setRole(r)} style={{ flex: 1, padding: '8px 6px', border: `2px solid ${role === r ? T.green : T.border}`, background: role === r ? '#F0FDF4' : T.white, color: role === r ? T.green : T.muted, borderRadius: 8, cursor: 'pointer', fontSize: 11, fontWeight: 700, fontFamily: 'inherit' }}>
               {l}
             </button>

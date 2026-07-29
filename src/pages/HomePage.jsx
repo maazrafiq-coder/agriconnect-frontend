@@ -18,7 +18,7 @@ export default function HomePage() {
   useEffect(() => {
     apiGetProducts({ limit: 4, sortBy: 'featured' })
       .then(res => setFeatured(adaptProducts(res.data || [])))
-      .catch(() => setFeatured(adaptProducts(MOCK_PRODUCTS.slice(0, 4))));
+      .catch(() => setFeatured(MOCK_PRODUCTS.slice(0, 4)));
   }, []);
 
   return (
@@ -76,7 +76,7 @@ export default function HomePage() {
           <Btn variant="secondary" onClick={() => navigate('/marketplace')}>View All Products →</Btn>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(240px,1fr))', gap: 16 }}>
-          {(featured.length > 0 ? featured : adaptProducts(MOCK_PRODUCTS.slice(0, 4))).map(p => (
+          {(featured.length > 0 ? featured : MOCK_PRODUCTS.slice(0, 4)).map(p => (
             <ProductCard key={p.id} product={p} />
           ))}
         </div>

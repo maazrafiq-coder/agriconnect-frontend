@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { apiGetReceivedOffers, apiGetOrders, apiAcceptOffer, apiRejectOffer, apiCounterOffer, apiGetMyProducts } from '../lib/api';
+import { apiGetReceivedOffers, apiGetOrders, apiAcceptOffer, apiRejectOffer, apiCounterOffer, apiGetMyProducts, apiCreateProduct, apiChangeProductStatus, apiGetCategories, apiGetCities, apiGetUnits } from '../lib/api';
 import { adaptOffers, adaptOrders, adaptProducts } from '../lib/adapters';
 import { useNavigate } from 'react-router-dom';
 import { PRODUCTS } from '../data';
@@ -36,23 +36,24 @@ const MESSAGES = [
 export default function SellerDashboard() {
   const navigate = useNavigate();
   const [tab, setTab] = useState('overview');
-  const [offerStatuses, setOfferStatuses] = useState({ 1:'pending', 2:'pending', 3:'accepted' });
+  const [declineModal, setDeclineModal] = useState(null);
   const [counterModal, setCounterModal] = useState(null);
+  const [newListingModal, setNewListingModal] = useState(false);
   const [activeConvo, setActiveConvo] = useState(0);
   const [msgInput, setMsgInput] = useState('');
   const [chatMessages, setChatMessages] = useState(MESSAGES[0].chat);
-  const [OFFERS, setOFFERS] = useState(adaptOffers(MOCK_OFFERS));
-  const [ORDERS, setORDERS] = useState(adaptOrders(MOCK_ORDERS));
+  const [OFFERS, setOFFERS] = useState(MOCK_OFFERS);
+  const [ORDERS, setORDERS] = useState(MOCK_ORDERS);
   const [myListings, setMyListings] = useState([]);
 
   useEffect(() => {
     apiGetReceivedOffers()
       .then(data => setOFFERS(adaptOffers(Array.isArray(data) ? data : [])))
-      .catch(() => setOFFERS(adaptOffers(MOCK_OFFERS)));
+      .catch(() => setOFFERS(MOCK_OFFERS));
 
     apiGetOrders('seller')
       .then(data => setORDERS(adaptOrders(Array.isArray(data) ? data : [])))
-      .catch(() => setORDERS(adaptOrders(MOCK_ORDERS)));
+      .catch(() => setORDERS(MOCK_ORDERS));
 
     apiGetMyProducts()
       .then(data => setMyListings(adaptProducts(Array.isArray(data) ? data : [])))
@@ -86,7 +87,7 @@ export default function SellerDashboard() {
             <p style={{ margin: 0, color: T.muted, fontSize: 12 }}>Khan Rice Mills · ✓ Verified · Sheikhupura, Punjab</p>
           </div>
         </div>
-        <Btn variant="gold">+ New Listing</Btn>
+        <Btn variant="gold" onClick={() => setNewListingModal(true)}>+ New Listing</Btn>
       </div>
 
       <Tabs
@@ -115,8 +116,8 @@ export default function SellerDashboard() {
                     <div style={{ fontWeight: 700, fontSize: 12 }}>{o.buyer}</div>
                     <div style={{ fontSize: 11, color: T.muted }}>{o.product} · {o.qty} · ₨{o.offered}/bag</div>
                   </div>
-                  <span style={{ background: SC[offerStatuses[o.id]]?.bg, color: SC[offerStatuses[o.id]]?.c, padding: '2px 8px', borderRadius: 8, fontSize: 10, fontWeight: 700 }}>
-                    {SC[offerStatuses[o.id]]?.l}
+                  <span style={{ background: SC[o.status]?.bg, color: SC[o.status]?.c, padding: '2px 8px', borderRadius: 8, fontSize: 10, fontWeight: 700 }}>
+                    {SC[o.status]?.l}
                   </span>
                 </div>
               ))}
@@ -155,13 +156,21 @@ export default function SellerDashboard() {
                 <div style={{ fontSize: 11, color: T.muted, marginBottom: 8 }}>{p.qty} {p.unit} · ₨{p.price.toLocaleString()}/bag</div>
                 <div style={{ display: 'flex', gap: 6 }}>
                   <Btn variant="secondary" size="sm" onClick={() => navigate(`/product/${p.id}`)}>View</Btn>
-                  <Btn variant="ghost" size="sm">Edit</Btn>
-                  <Btn variant="ghost" size="sm">Pause</Btn>
+                  <Btn variant="ghost" size="sm" onClick={() => setNewListingModal(true)}>Edit</Btn>
+                  <Btn variant="ghost" size="sm" onClick={async () => {
+                    try {
+                      await apiChangeProductStatus(p._raw?.id || p.id, p.status === 'PAUSED' ? 'ACTIVE' : 'PAUSED');
+                      setMyListings(prev => prev.map(x => x.id === p.id ? { ...x, status: x.status === 'PAUSED' ? 'ACTIVE' : 'PAUSED' } : x));
+                    } catch (e) { /* keep UI responsive even if API unavailable in demo */ }
+                  }}>{p.status === 'PAUSED' ? 'Resume' : 'Pause'}</Btn>
                 </div>
               </div>
             </Card>
           ))}
-          <Card style={{ border: `2px dashed ${T.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 180, cursor: 'pointer' }}>
+          <Card
+            onClick={() => setNewListingModal(true)}
+            style={{ border: `2px dashed ${T.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 180, cursor: 'pointer' }}
+          >
             <div style={{ textAlign: 'center', color: T.muted }}>
               <div style={{ fontSize: 36, marginBottom: 8 }}>+</div>
               <div style={{ fontSize: 13, fontWeight: 700 }}>Add New Listing</div>
@@ -174,6 +183,7 @@ export default function SellerDashboard() {
       {tab === 'offers' && (
         <Card>
           <h3 style={{ margin: '0 0 16px', fontSize: 13, fontWeight: 800, color: T.green }}>All Offers Received</h3>
+          {OFFERS.length === 0 && <p style={{ fontSize: 13, color: T.muted, textAlign: 'center', padding: '20px 0' }}>No offers yet.</p>}
           {OFFERS.map(o => (
             <div key={o.id} style={{ padding: '14px 0', borderBottom: `1px solid ${T.border}` }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 10 }}>
@@ -182,22 +192,30 @@ export default function SellerDashboard() {
                   <div style={{ fontSize: 12, color: T.muted, margin: '3px 0' }}>
                     {o.product} · {o.qty} · Offered: <strong style={{ color: T.gold }}>₨{o.offered}/bag</strong> vs Asking: ₨{o.asking} · {o.time}
                   </div>
+                  {o.message && <div style={{ fontSize: 12, color: T.text, fontStyle: 'italic', marginTop: 4 }}>"{o.message}"</div>}
+                  {o.status === 'rejected' && o._raw?.rejectionReason && (
+                    <div style={{ fontSize: 11, color: T.danger, marginTop: 4 }}>Declined: {o._raw.rejectionReason}</div>
+                  )}
+                  {o.status === 'countered' && o.counter && (
+                    <div style={{ fontSize: 11, color: T.warn, marginTop: 4 }}>Your counter: ₨{o.counter}/bag</div>
+                  )}
                 </div>
                 <div style={{ display: 'flex', gap: 7, alignItems: 'center', flexWrap: 'wrap' }}>
-                  <span style={{ background: SC[offerStatuses[o.id]]?.bg, color: SC[offerStatuses[o.id]]?.c, padding: '3px 9px', borderRadius: 10, fontSize: 11, fontWeight: 700 }}>
-                    {SC[offerStatuses[o.id]]?.l}
+                  <span style={{ background: SC[o.status]?.bg, color: SC[o.status]?.c, padding: '3px 9px', borderRadius: 10, fontSize: 11, fontWeight: 700 }}>
+                    {SC[o.status]?.l}
                   </span>
-                  {offerStatuses[o.id] === 'pending' && (
+                  {o.status === 'pending' && (
                     <>
                       <Btn variant="primary" size="sm" onClick={async () => {
-                        try { await apiAcceptOffer(o._raw?.id || o.id); } catch (e) {}
-                        setOfferStatuses(s => ({ ...s, [o.id]: 'accepted' }));
+                        try {
+                          await apiAcceptOffer(o._raw?.id || o.id);
+                          setOFFERS(prev => prev.map(x => x.id === o.id ? { ...x, status: 'accepted' } : x));
+                        } catch (err) {
+                          alert(err.message || 'Failed to accept offer');
+                        }
                       }}>Accept</Btn>
                       <Btn variant="secondary" size="sm" onClick={() => setCounterModal(o)}>Counter</Btn>
-                      <Btn variant="ghost" size="sm" onClick={async () => {
-                        try { await apiRejectOffer(o._raw?.id || o.id); } catch (e) {}
-                        setOfferStatuses(s => ({ ...s, [o.id]: 'rejected' }));
-                      }}>Decline</Btn>
+                      <Btn variant="ghost" size="sm" onClick={() => setDeclineModal(o)}>Decline</Btn>
                     </>
                   )}
                 </div>
@@ -315,24 +333,308 @@ export default function SellerDashboard() {
       )}
 
       {/* COUNTER OFFER MODAL */}
-      {counterModal && (
-        <Modal title={`Counter Offer — ${counterModal.buyer}`} onClose={() => setCounterModal(null)}>
-          <div style={{ background: T.surface, borderRadius: 8, padding: '10px 14px', marginBottom: 14 }}>
-            <div style={{ fontSize: 12, color: T.muted }}>Their offer: <strong style={{ color: T.gold }}>₨{counterModal.offered}/bag</strong> · Your asking: ₨{counterModal.asking}/bag</div>
-          </div>
-          <label style={{ fontSize: 11, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5 }}>YOUR COUNTER PRICE (₨/bag)</label>
-          <input defaultValue={counterModal.asking - 100} type="number" style={{ width: '100%', padding: '10px 13px', border: `1.5px solid ${T.border}`, borderRadius: 7, fontSize: 14, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box', marginBottom: 12, fontWeight: 700 }} />
-          <label style={{ fontSize: 11, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5 }}>MESSAGE (optional)</label>
-          <textarea rows={3} placeholder="Explain your counter offer..." style={{ width: '100%', padding: '9px 12px', border: `1.5px solid ${T.border}`, borderRadius: 7, fontSize: 12, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box', resize: 'vertical', marginBottom: 16 }} />
-          <Btn variant="primary" style={{ width: '100%' }} onClick={async () => {
-            try { await apiCounterOffer(counterModal._raw?.id || counterModal.id, { counterPrice: counterModal.asking - 100 }); } catch (e) {}
-            setOfferStatuses(s => ({ ...s, [counterModal.id]: 'accepted' }));
-            setCounterModal(null);
-          }}>
-            Send Counter Offer →
-          </Btn>
-        </Modal>
+      {counterModal && <CounterOfferModal offer={counterModal} onClose={() => setCounterModal(null)} onSent={(updated) => {
+        setOFFERS(prev => prev.map(x => x.id === counterModal.id ? { ...x, status: 'countered', counter: updated.counterPrice } : x));
+        setCounterModal(null);
+      }} />}
+
+      {declineModal && <DeclineOfferModal offer={declineModal} onClose={() => setDeclineModal(null)} onDeclined={(reason) => {
+        setOFFERS(prev => prev.map(x => x.id === declineModal.id ? { ...x, status: 'rejected', _raw: { ...x._raw, rejectionReason: reason } } : x));
+        setDeclineModal(null);
+      }} />}
+
+      {newListingModal && (
+        <NewListingModal
+          onClose={() => setNewListingModal(false)}
+          onCreated={(created) => {
+            setMyListings(prev => [adaptProducts([created])[0], ...prev]);
+            setNewListingModal(false);
+          }}
+        />
       )}
     </div>
+  );
+}
+
+// ─── COUNTER OFFER MODAL ────────────────────────────────────────────────────────
+function CounterOfferModal({ offer, onClose, onSent }) {
+  const [counterPrice, setCounterPrice] = useState(String(offer.asking - 100));
+  const [counterMessage, setCounterMessage] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleSend = async () => {
+    if (!counterPrice || Number(counterPrice) <= 0) {
+      setError('Enter a valid counter price');
+      return;
+    }
+    setError('');
+    setLoading(true);
+    try {
+      const result = await apiCounterOffer(offer._raw?.id || offer.id, {
+        counterPrice: Number(counterPrice),
+        counterMessage: counterMessage || undefined,
+      });
+      onSent({ counterPrice: Number(counterPrice) });
+    } catch (err) {
+      setError(err.message || 'Failed to send counter offer');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Modal title={`Counter Offer — ${offer.buyer}`} onClose={onClose}>
+      <div style={{ background: T.surface, borderRadius: 8, padding: '10px 14px', marginBottom: 14 }}>
+        <div style={{ fontSize: 12, color: T.muted }}>Their offer: <strong style={{ color: T.gold }}>₨{offer.offered}/bag</strong> · Your asking: ₨{offer.asking}/bag</div>
+      </div>
+      <label style={{ fontSize: 11, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5 }}>YOUR COUNTER PRICE (₨/bag)</label>
+      <input value={counterPrice} onChange={e => setCounterPrice(e.target.value)} type="number" style={{ width: '100%', padding: '10px 13px', border: `1.5px solid ${T.border}`, borderRadius: 7, fontSize: 14, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box', marginBottom: 12, fontWeight: 700 }} />
+      <label style={{ fontSize: 11, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5 }}>MESSAGE (optional)</label>
+      <textarea value={counterMessage} onChange={e => setCounterMessage(e.target.value)} rows={3} placeholder="Explain your counter offer..." style={{ width: '100%', padding: '9px 12px', border: `1.5px solid ${T.border}`, borderRadius: 7, fontSize: 12, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box', resize: 'vertical', marginBottom: 16 }} />
+      {error && <div style={{ fontSize: 12, color: T.danger, marginBottom: 12, background: '#FEE2E2', padding: '8px 12px', borderRadius: 7 }}>⚠ {error}</div>}
+      <Btn variant="primary" style={{ width: '100%' }} onClick={handleSend} disabled={loading}>
+        {loading ? 'Sending…' : 'Send Counter Offer →'}
+      </Btn>
+    </Modal>
+  );
+}
+
+// ─── DECLINE OFFER MODAL (with required reason) ───────────────────────────────
+function DeclineOfferModal({ offer, onClose, onDeclined }) {
+  const [reason, setReason] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const QUICK_REASONS = ['Price too low', 'Insufficient quantity available', 'Already sold to another buyer', 'Quality requirements not met'];
+
+  const handleDecline = async () => {
+    if (!reason.trim()) {
+      setError('Please provide a reason — the buyer will see this');
+      return;
+    }
+    setError('');
+    setLoading(true);
+    try {
+      await apiRejectOffer(offer._raw?.id || offer.id, reason);
+      onDeclined(reason);
+    } catch (err) {
+      setError(err.message || 'Failed to decline offer');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Modal title={`Decline Offer — ${offer.buyer}`} onClose={onClose}>
+      <div style={{ background: T.surface, borderRadius: 8, padding: '10px 14px', marginBottom: 14 }}>
+        <div style={{ fontSize: 12, color: T.muted }}>{offer.product} · {offer.qty} · Offered: <strong style={{ color: T.gold }}>₨{offer.offered}/bag</strong></div>
+      </div>
+      <div style={{ marginBottom: 10, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+        {QUICK_REASONS.map(r => (
+          <button key={r} onClick={() => setReason(r)} style={{ fontSize: 11, padding: '5px 10px', borderRadius: 14, border: `1.5px solid ${reason === r ? T.danger : T.border}`, background: reason === r ? '#FEE2E2' : T.white, color: reason === r ? T.danger : T.muted, cursor: 'pointer', fontFamily: 'inherit' }}>{r}</button>
+        ))}
+      </div>
+      <label style={{ fontSize: 11, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5 }}>REASON (visible to buyer) *</label>
+      <textarea value={reason} onChange={e => setReason(e.target.value)} rows={3} placeholder="Let the buyer know why you're declining..." style={{ width: '100%', padding: '9px 12px', border: `1.5px solid ${T.border}`, borderRadius: 7, fontSize: 12, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box', resize: 'vertical', marginBottom: 12 }} />
+      {error && <div style={{ fontSize: 12, color: T.danger, marginBottom: 12, background: '#FEE2E2', padding: '8px 12px', borderRadius: 7 }}>⚠ {error}</div>}
+      <Btn variant="danger" style={{ width: '100%' }} onClick={handleDecline} disabled={loading}>
+        {loading ? 'Declining…' : 'Confirm Decline →'}
+      </Btn>
+    </Modal>
+  );
+}
+
+// ─── NEW LISTING MODAL ─────────────────────────────────────────────────────────
+const RICE_STAGES = ['PADDY', 'BROWN_RICE', 'MILLED_WHITE', 'WHITE_RICE', 'PARBOILED'];
+
+function NewListingModal({ onClose, onCreated }) {
+  const [form, setForm] = useState({
+    category: 'rice', name: '', description: '', quantity: '', unit: '40kg bags',
+    askingPrice: '', minOrderQty: '', locationCity: '', locationProvince: 'Punjab',
+    harvestDate: '', packagingType: '', deliveryTerms: '',
+    // Rice-specific (optional, only sent if category is RICE)
+    stage: 'MILLED_WHITE', variety: '', moisturePct: '', grainLengthMm: '', brokenPct: '', purityPct: '',
+  });
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [categories, setCategories] = useState([
+    { slug: 'rice', name: 'Rice', icon: '🌾' }, { slug: 'paddy', name: 'Paddy', icon: '🌾' },
+    { slug: 'wheat', name: 'Wheat', icon: '🌿' }, { slug: 'maize', name: 'Maize', icon: '🌽' },
+    { slug: 'pulses', name: 'Pulses', icon: '🫘' }, { slug: 'oil-seeds', name: 'Oil Seeds', icon: '🛢️' },
+  ]); // instant fallback; replaced once the real admin-managed list loads
+  const [cities, setCities] = useState([]);
+  const [units, setUnits] = useState([]);
+
+  useEffect(() => {
+    apiGetCategories().then(setCategories).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    apiGetCities().then(setCities).catch(() => setCities([]));
+  }, []);
+
+  // Units depend on which category is currently selected — re-fetch whenever
+  // it changes so e.g. picking "Cotton" surfaces "Bales" in the dropdown.
+  useEffect(() => {
+    apiGetUnits(form.category).then(list => {
+      setUnits(list);
+      // If the previously-selected unit isn't valid for the new category, clear it
+      if (form.unit && !list.some(u => u.name === form.unit)) {
+        set('unit', '');
+      }
+    }).catch(() => setUnits([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.category]);
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const inputStyle = { width: '100%', padding: '9px 12px', border: `1.5px solid ${T.border}`, borderRadius: 7, fontSize: 13, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' };
+  const labelStyle = { fontSize: 11, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5 };
+
+  const handleSubmit = async () => {
+    if (!form.name || !form.quantity || !form.askingPrice || !form.minOrderQty || !form.locationCity) {
+      setError('Please fill in all required fields: name, quantity, price, min. order, and location');
+      return;
+    }
+    setError('');
+    setLoading(true);
+    try {
+      const payload = {
+        category: form.category,
+        name: form.name,
+        description: form.description || undefined,
+        quantity: Number(form.quantity),
+        unit: form.unit,
+        askingPrice: Number(form.askingPrice),
+        minOrderQty: Number(form.minOrderQty),
+        locationCity: form.locationCity,
+        locationProvince: form.locationProvince,
+        harvestDate: form.harvestDate || undefined,
+        packagingType: form.packagingType || undefined,
+        deliveryTerms: form.deliveryTerms || undefined,
+        ...(form.category === 'rice' && form.variety ? {
+          riceDetails: {
+            stage: form.stage,
+            variety: form.variety,
+            moisturePct: form.moisturePct ? Number(form.moisturePct) : undefined,
+            grainLengthMm: form.grainLengthMm ? Number(form.grainLengthMm) : undefined,
+            brokenPct: form.brokenPct ? Number(form.brokenPct) : undefined,
+            purityPct: form.purityPct ? Number(form.purityPct) : undefined,
+          },
+        } : {}),
+      };
+      const created = await apiCreateProduct(payload);
+      onCreated(created);
+    } catch (err) {
+      setError(err.message || 'Failed to create listing');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Modal title="Create New Listing" onClose={onClose}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+        <div>
+          <label style={labelStyle}>CATEGORY</label>
+          <select value={form.category} onChange={e => set('category', e.target.value)} style={inputStyle}>
+            {categories.map(c => <option key={c.slug} value={c.slug}>{c.icon ? `${c.icon} ` : ''}{c.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={labelStyle}>PRODUCT NAME *</label>
+          <input value={form.name} onChange={e => set('name', e.target.value)} placeholder="e.g. 1121 Basmati — Milled White" style={inputStyle} />
+        </div>
+      </div>
+
+      <div style={{ marginBottom: 12 }}>
+        <label style={labelStyle}>DESCRIPTION</label>
+        <textarea value={form.description} onChange={e => set('description', e.target.value)} rows={2} placeholder="Describe quality, certifications, export suitability..." style={{ ...inputStyle, resize: 'vertical' }} />
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 12 }}>
+        <div>
+          <label style={labelStyle}>QUANTITY *</label>
+          <input value={form.quantity} onChange={e => set('quantity', e.target.value)} type="number" placeholder="500" style={inputStyle} />
+        </div>
+        <div>
+          <label style={labelStyle}>UNIT</label>
+          <select value={form.unit} onChange={e => set('unit', e.target.value)} style={inputStyle}>
+            <option value="">— Select unit —</option>
+            {units.map(u => <option key={u.id} value={u.name}>{u.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={labelStyle}>MIN. ORDER *</label>
+          <input value={form.minOrderQty} onChange={e => set('minOrderQty', e.target.value)} type="number" placeholder="50" style={inputStyle} />
+        </div>
+      </div>
+
+      <div style={{ marginBottom: 12 }}>
+        <label style={labelStyle}>ASKING PRICE (₨) *</label>
+        <input value={form.askingPrice} onChange={e => set('askingPrice', e.target.value)} type="number" placeholder="3800" style={inputStyle} />
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+        <div>
+          <label style={labelStyle}>CITY *</label>
+          <select value={form.locationCity} onChange={e => set('locationCity', e.target.value)} style={inputStyle}>
+            <option value="">— Select city —</option>
+            {cities.filter(c => c.province === form.locationProvince).map(c => (
+              <option key={c.id} value={c.name}>{c.name}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label style={labelStyle}>PROVINCE</label>
+          <select value={form.locationProvince} onChange={e => { set('locationProvince', e.target.value); set('locationCity', ''); }} style={inputStyle}>
+            {['Punjab', 'Sindh', 'KPK', 'Balochistan'].map(p => <option key={p}>{p}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
+        <div>
+          <label style={labelStyle}>HARVEST DATE</label>
+          <input value={form.harvestDate} onChange={e => set('harvestDate', e.target.value)} type="date" style={inputStyle} />
+        </div>
+        <div>
+          <label style={labelStyle}>PACKAGING TYPE</label>
+          <input value={form.packagingType} onChange={e => set('packagingType', e.target.value)} placeholder="Woven PP Bags" style={inputStyle} />
+        </div>
+      </div>
+
+      {form.category === 'rice' && (
+        <div style={{ background: T.surface, borderRadius: 10, padding: 14, marginBottom: 16 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: T.green, marginBottom: 10 }}>🌾 Rice Quality Details (optional but recommended)</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+            <div>
+              <label style={labelStyle}>MILLING STAGE</label>
+              <select value={form.stage} onChange={e => set('stage', e.target.value)} style={inputStyle}>
+                {RICE_STAGES.map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={labelStyle}>VARIETY</label>
+              <input value={form.variety} onChange={e => set('variety', e.target.value)} placeholder="1121 Basmati" style={inputStyle} />
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 8 }}>
+            {[['Moisture %', 'moisturePct'], ['Grain Length (mm)', 'grainLengthMm'], ['Broken %', 'brokenPct'], ['Purity %', 'purityPct']].map(([label, key]) => (
+              <div key={key}>
+                <label style={{ ...labelStyle, fontSize: 10 }}>{label}</label>
+                <input value={form[key]} onChange={e => set(key, e.target.value)} type="number" step="0.1" style={{ ...inputStyle, padding: '7px 9px' }} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {error && <div style={{ fontSize: 12, color: T.danger, marginBottom: 14, background: '#FEE2E2', padding: '8px 12px', borderRadius: 7 }}>⚠ {error}</div>}
+
+      <Btn variant="primary" style={{ width: '100%', padding: '11px' }} onClick={handleSubmit} disabled={loading}>
+        {loading ? 'Creating…' : 'Create Listing →'}
+      </Btn>
+    </Modal>
   );
 }

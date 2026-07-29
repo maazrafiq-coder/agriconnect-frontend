@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import ProductCard from '../components/ProductCard';
 import { Card } from '../components/ui';
-import { apiGetProducts } from '../lib/api';
+import { apiGetProducts, apiGetCategories } from '../lib/api';
 import { adaptProducts } from '../lib/adapters';
 import { PRODUCTS as MOCK } from '../data';
 import T from '../theme';
@@ -18,6 +18,14 @@ export default function MarketplacePage() {
   const [verifiedOnly, setVerifiedOnly] = useState(false);
   const [products,     setProducts]     = useState([]);
   const [total,        setTotal]        = useState(0);
+  const [categories,   setCategories]   = useState([
+    { slug: 'rice', name: 'Rice' }, { slug: 'paddy', name: 'Paddy' }, { slug: 'wheat', name: 'Wheat' },
+    { slug: 'maize', name: 'Maize' }, { slug: 'pulses', name: 'Pulses' }, { slug: 'oil-seeds', name: 'Oil Seeds' },
+  ]); // sensible fallback shown instantly, replaced once the real list loads
+
+  useEffect(() => {
+    apiGetCategories().then(setCategories).catch(() => {});
+  }, []);
   const [loading,      setLoading]      = useState(true);
 
   // Fetch from API whenever filters change
@@ -41,7 +49,7 @@ export default function MarketplacePage() {
       })
       .catch(() => {
         // Fallback: filter mock data locally
-        let r = adaptProducts(MOCK);
+        let r = [...MOCK];
         if (search)      r = r.filter(p => [p.name, p.variety, p.seller, p.location].some(s => s?.toLowerCase().includes(search.toLowerCase())));
         if (cat !== 'All')      r = r.filter(p => p.cat === cat);
         if (province !== 'All') r = r.filter(p => p.location?.includes(province));
@@ -87,9 +95,10 @@ export default function MarketplacePage() {
 
             <div style={{ marginBottom: 13 }}>
               <label style={{ fontSize: 10, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 6, letterSpacing: 0.5 }}>CATEGORY</label>
-              {['All', 'RICE', 'PADDY', 'WHEAT', 'MAIZE', 'PULSES', 'OIL_SEEDS'].map(c => (
-                <div key={c} onClick={() => setCat(c)} style={{ padding: '6px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: cat === c ? 700 : 400, color: cat === c ? T.green : T.text, background: cat === c ? '#F0FDF4' : 'transparent', marginBottom: 1 }}>
-                  {c === 'All' ? 'All Categories' : c.replace(/_/g, ' ')}
+              <div onClick={() => setCat('All')} style={{ padding: '6px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: cat === 'All' ? 700 : 400, color: cat === 'All' ? T.green : T.text, background: cat === 'All' ? '#F0FDF4' : 'transparent', marginBottom: 1 }}>All Categories</div>
+              {categories.map(c => (
+                <div key={c.slug} onClick={() => setCat(c.slug)} style={{ padding: '6px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: cat === c.slug ? 700 : 400, color: cat === c.slug ? T.green : T.text, background: cat === c.slug ? '#F0FDF4' : 'transparent', marginBottom: 1 }}>
+                  {c.icon ? `${c.icon} ` : ''}{c.name}
                 </div>
               ))}
             </div>

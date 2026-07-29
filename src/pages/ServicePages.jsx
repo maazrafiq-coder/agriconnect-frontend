@@ -17,7 +17,7 @@ export function TestingPage() {
   useEffect(() => {
     apiGetAgencies()
       .then(data => setAgencies(adaptAgencies(Array.isArray(data) ? data : [])))
-      .catch(() => setAgencies(adaptAgencies(MOCK_A)))
+      .catch(() => setAgencies(MOCK_A))
       .finally(() => setLoading(false));
   }, []);
 
@@ -134,7 +134,7 @@ export function TransportPage() {
   useEffect(() => {
     apiGetTransporters()
       .then(data => setTransporters(adaptTransporters(Array.isArray(data) ? data : [])))
-      .catch(() => setTransporters(adaptTransporters(MOCK_T)))
+      .catch(() => setTransporters(MOCK_T))
       .finally(() => setLoading(false));
   }, []);
 

@@ -29,9 +29,9 @@ export default function ProductDetailPage() {
     Promise.all([
       apiGetProduct(id).then(adaptProduct).catch(() => {
         const mock = MOCK.find(x => String(x.id) === String(id));
-        return mock ? adaptProduct(mock) : adaptProduct(MOCK[0]);
+        return mock || MOCK[0];
       }),
-      apiGetAgencies().then(r => adaptAgencies(r || [])).catch(() => adaptAgencies(MOCK_AGENCIES)),
+      apiGetAgencies().then(r => adaptAgencies(r || [])).catch(() => MOCK_AGENCIES),
     ]).then(([product, agList]) => {
       setP(product);
       setOfferPrice(String(product.price));
