@@ -3,13 +3,16 @@ import {
   apiAdminGetUsers, apiAdminUpdateKyc, apiAdminSetUserActive,
   apiAdminGetProducts, apiAdminRemoveProduct, apiAdminRestoreProduct,
   apiAdminGetOrders, apiAdminResolveDispute,
-  apiAdminGetWarehouses, apiAdminVerifyWarehouse,
+  apiAdminGetWarehouses, apiAdminVerifyWarehouse, apiAdminSetWarehouseActive,
   apiAdminGetCategories, apiAdminCreateCategory, apiAdminUpdateCategory,
   apiAdminDeactivateCategory, apiAdminReactivateCategory,
   apiAdminGetCities, apiAdminCreateCity, apiAdminUpdateCity,
   apiAdminDeactivateCity, apiAdminReactivateCity,
   apiAdminGetUnits, apiAdminCreateUnit, apiAdminUpdateUnit,
   apiAdminDeactivateUnit, apiAdminReactivateUnit,
+  apiAdminCreateUser, apiAdminResetUserPassword,
+  apiAdminGetAllAgencies, apiAdminGetAllTransporters,
+  apiAdminSetTestingAgencyActive, apiAdminSetTransportActive,
 } from '../lib/api';
 import { Card, Btn, Badge, Modal } from '../components/ui';
 import { STATUS_COLORS as SC } from '../data';
@@ -51,6 +54,7 @@ const ComingSoon = ({ title, features }) => (
 
 export default function AdminDashboard() {
   const [section, setSection] = useState('dashboard');
+  const [userSearch, setUserSearch] = useState('');
   const [subTab, setSubTab] = useState(null);
 
   // Data
@@ -62,21 +66,35 @@ export default function AdminDashboard() {
 
   // Modals
   const [kycModal, setKycModal] = useState(null);
+  const [createUserModal, setCreateUserModal] = useState(false);
+  const [resetPasswordModal, setResetPasswordModal] = useState(null);
+  const [tempPasswordModal, setTempPasswordModal] = useState(null);
+  const [testingAgencies, setTestingAgencies] = useState([]);
+  const [transporters, setTransporters] = useState([]);
   const [removeModal, setRemoveModal] = useState(null);
   const [disputeModal, setDisputeModal] = useState(null);
 
+  const [loadError, setLoadError] = useState(null);
+
   const loadAll = () => {
     setLoading(true);
-    Promise.all([
-      apiAdminGetUsers().catch(() => ({ data: [] })),
-      apiAdminGetProducts().catch(() => ({ data: [] })),
-      apiAdminGetOrders().catch(() => ({ data: [] })),
-      apiAdminGetWarehouses().catch(() => []),
-    ]).then(([u, p, o, w]) => {
-      setUsers(u.data || []);
-      setProducts(p.data || []);
-      setOrders(o.data || []);
-      setWarehouses(Array.isArray(w) ? w : []);
+    setLoadError(null);
+    Promise.allSettled([
+      apiAdminGetUsers(),
+      apiAdminGetProducts(),
+      apiAdminGetOrders(),
+      apiAdminGetWarehouses(),
+      apiAdminGetAllAgencies(),
+      apiAdminGetAllTransporters(),
+    ]).then(([u, p, o, w, ta, tr]) => {
+      const failures = [];
+      if (u.status === 'fulfilled') setUsers(u.value.data || []); else failures.push(`Users: ${u.reason?.message || 'failed to load'}`);
+      if (p.status === 'fulfilled') setProducts(p.value.data || []); else failures.push(`Products: ${p.reason?.message || 'failed to load'}`);
+      if (o.status === 'fulfilled') setOrders(o.value.data || []); else failures.push(`Orders: ${o.reason?.message || 'failed to load'}`);
+      if (w.status === 'fulfilled') setWarehouses(Array.isArray(w.value) ? w.value : []); else failures.push(`Warehouses: ${w.reason?.message || 'failed to load'}`);
+      if (ta.status === 'fulfilled') setTestingAgencies(Array.isArray(ta.value) ? ta.value : []); else failures.push(`Testing agencies: ${ta.reason?.message || 'failed to load'}`);
+      if (tr.status === 'fulfilled') setTransporters(Array.isArray(tr.value) ? tr.value : []); else failures.push(`Transporters: ${tr.reason?.message || 'failed to load'}`);
+      if (failures.length > 0) setLoadError(failures.join(' · '));
     }).finally(() => setLoading(false));
   };
 
@@ -127,6 +145,13 @@ export default function AdminDashboard() {
       {/* MAIN CONTENT */}
       <div style={{ flex: 1, padding: '28px 32px', maxWidth: 1200 }}>
 
+        {loadError && (
+          <div style={{ background: '#FEE2E2', border: `1px solid ${T.danger}`, borderRadius: 8, padding: '10px 14px', marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ fontSize: 12, color: T.danger }}>⚠ Some data failed to load: {loadError}</div>
+            <Btn variant="danger" size="sm" onClick={loadAll}>Retry</Btn>
+          </div>
+        )}
+
         {/* DASHBOARD */}
         {section === 'dashboard' && (
           <div>
@@ -176,7 +201,16 @@ export default function AdminDashboard() {
                 <h1 style={{ fontSize: 20, fontWeight: 900, color: T.green, margin: '0 0 4px' }}>👥 User Management</h1>
                 <p style={{ fontSize: 13, color: T.muted, margin: 0 }}>Farmers · Buyers · Transporters · KYC · Activate/Suspend</p>
               </div>
-              <Btn variant="secondary" onClick={loadAll}>↻ Refresh</Btn>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Btn variant="gold" onClick={() => setCreateUserModal(true)}>+ Create User</Btn>
+                <Btn variant="secondary" onClick={loadAll}>↻ Refresh</Btn>
+              </div>
+            </div>
+
+            <div style={{ position: 'relative', maxWidth: 340, marginBottom: 14 }}>
+              <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: T.muted, fontSize: 14 }}>🔍</span>
+              <input value={userSearch} onChange={e => setUserSearch(e.target.value)} placeholder="Search by name, phone, role, city…"
+                style={{ width: '100%', padding: '9px 12px 9px 34px', border: `1.5px solid ${T.border}`, borderRadius: 8, fontSize: 13, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' }} />
             </div>
 
             <Card style={{ padding: 0, overflow: 'hidden' }}>
@@ -189,7 +223,16 @@ export default function AdminDashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {users.map((u, i) => (
+                  {users.filter(u => {
+                    if (!userSearch) return true;
+                    const q = userSearch.toLowerCase();
+                    return (
+                      u.profile?.fullName?.toLowerCase().includes(q) ||
+                      u.phoneNumber?.toLowerCase().includes(q) ||
+                      u.role?.toLowerCase().includes(q) ||
+                      u.profile?.city?.toLowerCase().includes(q)
+                    );
+                  }).map((u, i) => (
                     <tr key={u.id} style={{ background: i % 2 === 0 ? T.surface : T.white }}>
                       <td style={{ padding: '10px 14px' }}>
                         <div style={{ fontWeight: 700 }}>{u.profile?.fullName || '—'}</div>
@@ -218,6 +261,7 @@ export default function AdminDashboard() {
                               setUsers(prev => prev.map(x => x.id === u.id ? { ...x, isActive: !x.isActive } : x));
                             } catch (e) { alert(e.message); }
                           }}>{u.isActive ? 'Suspend' : 'Activate'}</Btn>
+                          <Btn variant="ghost" size="sm" onClick={() => setResetPasswordModal(u)}>Reset PW</Btn>
                         </div>
                       </td>
                     </tr>
@@ -377,42 +421,118 @@ export default function AdminDashboard() {
         {/* LOGISTICS -> reuse warehouse admin data */}
         {section === 'logistics' && (
           <div>
-            <h1 style={{ fontSize: 20, fontWeight: 900, color: T.green, margin: '0 0 4px' }}>🚛 Logistics</h1>
-            <p style={{ fontSize: 13, color: T.muted, margin: '0 0 20px' }}>Warehouse network verification (transport request management coming soon)</p>
-            <Card style={{ padding: 0, overflow: 'hidden', marginBottom: 16 }}>
+            <h1 style={{ fontSize: 20, fontWeight: 900, color: T.green, margin: '0 0 4px' }}>🚛 Logistics & Service Listings</h1>
+            <p style={{ fontSize: 13, color: T.muted, margin: '0 0 20px' }}>Warehouses, testing agencies, and transport providers</p>
+
+            <div style={{ fontSize: 13, fontWeight: 700, color: T.green, margin: '0 0 10px' }}>🏪 Warehouses</div>
+            <Card style={{ padding: 0, overflow: 'hidden', marginBottom: 24 }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead>
                   <tr style={{ background: T.green }}>
-                    {['Warehouse', 'City', 'Type', 'Capacity', 'Verified', 'Actions'].map(h => (
+                    {['Warehouse', 'City', 'Type', 'Capacity', 'Verified', 'Listed', 'Actions'].map(h => (
                       <th key={h} style={{ padding: '10px 14px', color: '#fff', textAlign: 'left', fontWeight: 700 }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {warehouses.map((w, i) => (
-                    <tr key={w.id} style={{ background: i % 2 === 0 ? T.surface : T.white }}>
+                    <tr key={w.id} style={{ background: i % 2 === 0 ? T.surface : T.white, opacity: w.isActive ? 1 : 0.55 }}>
                       <td style={{ padding: '10px 14px', fontWeight: 700 }}>{w.name}</td>
                       <td style={{ padding: '10px 14px' }}>{w.city}</td>
                       <td style={{ padding: '10px 14px' }}>{w.type}</td>
                       <td style={{ padding: '10px 14px' }}>{w.totalCapacityTons?.toLocaleString()} tons</td>
                       <td style={{ padding: '10px 14px' }}>{w.isVerified ? '✅ Verified' : '⏳ Pending'}</td>
+                      <td style={{ padding: '10px 14px' }}>{w.isActive ? '🟢 Listed' : '🔴 Delisted'}</td>
                       <td style={{ padding: '10px 14px' }}>
-                        <Btn variant={w.isVerified ? 'ghost' : 'primary'} size="sm" onClick={async () => {
-                          try {
-                            await apiAdminVerifyWarehouse(w.id, !w.isVerified);
-                            setWarehouses(prev => prev.map(x => x.id === w.id ? { ...x, isVerified: !x.isVerified } : x));
-                          } catch (e) { alert(e.message); }
-                        }}>{w.isVerified ? 'Unverify' : 'Verify'}</Btn>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <Btn variant={w.isVerified ? 'ghost' : 'primary'} size="sm" onClick={async () => {
+                            try {
+                              await apiAdminVerifyWarehouse(w.id, !w.isVerified);
+                              setWarehouses(prev => prev.map(x => x.id === w.id ? { ...x, isVerified: !x.isVerified } : x));
+                            } catch (e) { alert(e.message); }
+                          }}>{w.isVerified ? 'Unverify' : 'Verify'}</Btn>
+                          <Btn variant={w.isActive ? 'danger' : 'secondary'} size="sm" onClick={async () => {
+                            try {
+                              await apiAdminSetWarehouseActive(w.id, !w.isActive);
+                              setWarehouses(prev => prev.map(x => x.id === w.id ? { ...x, isActive: !x.isActive } : x));
+                            } catch (e) { alert(e.message); }
+                          }}>{w.isActive ? 'Delist' : 'Relist'}</Btn>
+                        </div>
                       </td>
                     </tr>
                   ))}
                   {warehouses.length === 0 && !loading && (
-                    <tr><td colSpan={6} style={{ padding: 20, textAlign: 'center', color: T.muted }}>No warehouses registered.</td></tr>
+                    <tr><td colSpan={7} style={{ padding: 20, textAlign: 'center', color: T.muted }}>No warehouses registered.</td></tr>
                   )}
                 </tbody>
               </table>
             </Card>
-            <ComingSoon title="Delivery Requests & Transporter Assignment" features={['Live shipment map', 'Transporter auto-assignment', 'Delivery charge management']} />
+
+            <div style={{ fontSize: 13, fontWeight: 700, color: T.green, margin: '0 0 10px' }}>🧪 Testing Agencies</div>
+            <Card style={{ padding: 0, overflow: 'hidden', marginBottom: 24 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead>
+                  <tr style={{ background: T.teal }}>
+                    {['Agency', 'City', 'Listed', 'Actions'].map(h => (
+                      <th key={h} style={{ padding: '10px 14px', color: '#fff', textAlign: 'left', fontWeight: 700 }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {testingAgencies.map((a, i) => (
+                    <tr key={a.id} style={{ background: i % 2 === 0 ? T.surface : T.white, opacity: a.isActive ? 1 : 0.55 }}>
+                      <td style={{ padding: '10px 14px', fontWeight: 700 }}>{a.name}</td>
+                      <td style={{ padding: '10px 14px' }}>{a.city}</td>
+                      <td style={{ padding: '10px 14px' }}>{a.isActive ? '🟢 Listed' : '🔴 Delisted'}</td>
+                      <td style={{ padding: '10px 14px' }}>
+                        <Btn variant={a.isActive ? 'danger' : 'secondary'} size="sm" onClick={async () => {
+                          try {
+                            await apiAdminSetTestingAgencyActive(a.id, !a.isActive);
+                            setTestingAgencies(prev => prev.map(x => x.id === a.id ? { ...x, isActive: !x.isActive } : x));
+                          } catch (e) { alert(e.message); }
+                        }}>{a.isActive ? 'Delist' : 'Relist'}</Btn>
+                      </td>
+                    </tr>
+                  ))}
+                  {testingAgencies.length === 0 && !loading && (
+                    <tr><td colSpan={4} style={{ padding: 20, textAlign: 'center', color: T.muted }}>No testing agencies registered.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </Card>
+
+            <div style={{ fontSize: 13, fontWeight: 700, color: T.green, margin: '0 0 10px' }}>🚛 Transport Providers</div>
+            <Card style={{ padding: 0, overflow: 'hidden', marginBottom: 16 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead>
+                  <tr style={{ background: T.cyan }}>
+                    {['Company', 'Listed', 'Actions'].map(h => (
+                      <th key={h} style={{ padding: '10px 14px', color: '#fff', textAlign: 'left', fontWeight: 700 }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {transporters.map((t, i) => (
+                    <tr key={t.id} style={{ background: i % 2 === 0 ? T.surface : T.white, opacity: t.isActive ? 1 : 0.55 }}>
+                      <td style={{ padding: '10px 14px', fontWeight: 700 }}>{t.companyName}</td>
+                      <td style={{ padding: '10px 14px' }}>{t.isActive ? '🟢 Listed' : '🔴 Delisted'}</td>
+                      <td style={{ padding: '10px 14px' }}>
+                        <Btn variant={t.isActive ? 'danger' : 'secondary'} size="sm" onClick={async () => {
+                          try {
+                            await apiAdminSetTransportActive(t.id, !t.isActive);
+                            setTransporters(prev => prev.map(x => x.id === t.id ? { ...x, isActive: !x.isActive } : x));
+                          } catch (e) { alert(e.message); }
+                        }}>{t.isActive ? 'Delist' : 'Relist'}</Btn>
+                      </td>
+                    </tr>
+                  ))}
+                  {transporters.length === 0 && !loading && (
+                    <tr><td colSpan={3} style={{ padding: 20, textAlign: 'center', color: T.muted }}>No transport providers registered.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </Card>
+            <ComingSoon title="Delivery Requests & Live Shipment Tracking" features={['Live shipment map', 'Transporter auto-assignment', 'Delivery charge management']} />
           </div>
         )}
 
@@ -450,6 +570,44 @@ export default function AdminDashboard() {
                 setKycModal(null);
               } catch (e) { alert(e.message); }
             }}>❌ Reject</Btn>
+          </div>
+        </Modal>
+      )}
+
+      {createUserModal && (
+        <CreateUserModal onClose={() => setCreateUserModal(false)} onCreated={(result) => {
+          setCreateUserModal(false);
+          setTempPasswordModal(result);
+          loadAll();
+        }} />
+      )}
+
+      {resetPasswordModal && (
+        <Modal title={`Reset Password — ${resetPasswordModal.profile?.fullName || resetPasswordModal.phoneNumber}`} onClose={() => setResetPasswordModal(null)}>
+          <p style={{ fontSize: 13, color: T.muted, marginBottom: 16 }}>
+            This generates a new temporary password for this user and immediately logs out all their active sessions. Share it with them securely.
+          </p>
+          <Btn variant="amber" style={{ width: '100%' }} onClick={async () => {
+            try {
+              const result = await apiAdminResetUserPassword(resetPasswordModal.id);
+              setResetPasswordModal(null);
+              setTempPasswordModal({ user: resetPasswordModal, temporaryPassword: result.temporaryPassword });
+            } catch (e) { alert(e.message); }
+          }}>Generate New Password →</Btn>
+        </Modal>
+      )}
+
+      {tempPasswordModal && (
+        <Modal title="Temporary Password Generated" onClose={() => setTempPasswordModal(null)}>
+          <div style={{ textAlign: 'center', padding: '10px 0' }}>
+            <div style={{ fontSize: 44, marginBottom: 12 }}>🔑</div>
+            <p style={{ fontSize: 13, color: T.muted, marginBottom: 16 }}>
+              Share this password securely — it will not be shown again.
+            </p>
+            <div style={{ background: T.surface, borderRadius: 10, padding: 16, marginBottom: 16, fontFamily: 'monospace', fontSize: 18, fontWeight: 800, color: T.green, letterSpacing: 1 }}>
+              {tempPasswordModal.temporaryPassword}
+            </div>
+            <Btn variant="primary" style={{ width: '100%' }} onClick={() => setTempPasswordModal(null)}>Done</Btn>
           </div>
         </Modal>
       )}
@@ -882,6 +1040,68 @@ function UnitFormModal({ title, initial, categories, isEdit, onClose, onSave }) 
 
       {error && <div style={{ fontSize: 12, color: T.danger, marginBottom: 12, background: '#FEE2E2', padding: '8px 12px', borderRadius: 7 }}>⚠ {error}</div>}
       <Btn variant="primary" style={{ width: '100%' }} onClick={handleSave} disabled={loading}>{loading ? 'Saving…' : isEdit ? 'Save Changes →' : 'Create Unit →'}</Btn>
+    </Modal>
+  );
+}
+
+// ─── CREATE USER MODAL (admin registers someone on their behalf) ──────────────
+function CreateUserModal({ onClose, onCreated }) {
+  const [fullName, setFullName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
+  const [role, setRole] = useState('BUYER');
+  const [customPassword, setCustomPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const ROLES = ['FARMER', 'TRADER', 'MILLER', 'EXPORTER', 'BUYER', 'TRANSPORTER', 'WAREHOUSE', 'TESTING_AGENCY', 'ADMIN', 'MODERATOR'];
+
+  const handleCreate = async () => {
+    if (!fullName || (!phone && !email)) {
+      setError('Full name and at least one of phone/email are required');
+      return;
+    }
+    setError('');
+    setLoading(true);
+    try {
+      const result = await apiAdminCreateUser({ phoneNumber: phone || undefined, email: email || undefined, fullName, role, password: customPassword || undefined });
+      onCreated(result);
+    } catch (err) {
+      setError(err.message || 'Failed to create user');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Modal title="Create User on Their Behalf" onClose={onClose}>
+      <div style={{ background: '#EFF6FF', borderRadius: 8, padding: '8px 12px', marginBottom: 14, fontSize: 11, color: '#1D4ED8' }}>
+        ℹ️ Accounts created here are automatically approved — no OTP or review needed.
+      </div>
+      <label style={{ fontSize: 11, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5 }}>FULL NAME *</label>
+      <input value={fullName} onChange={e => setFullName(e.target.value)} placeholder="Muhammad Ahmed" style={{ ...inputStyle, marginBottom: 12 }} />
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+        <div>
+          <label style={{ fontSize: 11, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5 }}>PHONE</label>
+          <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="0300-1234567" style={inputStyle} />
+        </div>
+        <div>
+          <label style={{ fontSize: 11, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5 }}>EMAIL</label>
+          <input value={email} onChange={e => setEmail(e.target.value)} placeholder="email@example.com" style={inputStyle} />
+        </div>
+      </div>
+
+      <label style={{ fontSize: 11, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5 }}>ROLE</label>
+      <select value={role} onChange={e => setRole(e.target.value)} style={{ ...inputStyle, marginBottom: 12 }}>
+        {ROLES.map(r => <option key={r} value={r}>{r.replace(/_/g, ' ')}</option>)}
+      </select>
+
+      <label style={{ fontSize: 11, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5 }}>PASSWORD (optional — auto-generated if left blank)</label>
+      <input value={customPassword} onChange={e => setCustomPassword(e.target.value)} placeholder="Leave blank to auto-generate" type="password" style={{ ...inputStyle, marginBottom: 12 }} />
+
+      {error && <div style={{ fontSize: 12, color: T.danger, marginBottom: 12, background: '#FEE2E2', padding: '8px 12px', borderRadius: 7 }}>⚠ {error}</div>}
+      <Btn variant="primary" style={{ width: '100%' }} onClick={handleCreate} disabled={loading}>{loading ? 'Creating…' : 'Create User →'}</Btn>
     </Modal>
   );
 }

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { apiGetOrders, apiGetMyTestingRequests, apiGetSavedProducts } from '../lib/api';
-import { adaptOrders, adaptProducts } from '../lib/adapters';
+import { adaptOrders, adaptProducts, adaptTestingRequests } from '../lib/adapters';
 import { useNavigate } from 'react-router-dom';
 import { PRODUCTS, STATUS_COLORS as SC } from '../data';
 import { Card, Btn, Tabs } from '../components/ui';
@@ -31,7 +31,7 @@ export default function BuyerDashboard() {
       .catch(() => setORDERS(MOCK_ORDERS));
 
     apiGetMyTestingRequests('requester')
-      .then(data => setTESTING(Array.isArray(data) && data.length ? data : MOCK_TESTING))
+      .then(data => setTESTING(Array.isArray(data) && data.length ? adaptTestingRequests(data) : MOCK_TESTING))
       .catch(() => setTESTING(MOCK_TESTING));
 
     apiGetSavedProducts()

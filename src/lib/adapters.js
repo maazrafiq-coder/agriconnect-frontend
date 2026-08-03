@@ -344,6 +344,32 @@ function titleCase(str) {
     .join(' ');
 }
 
+// ─── TESTING REQUEST ADAPTER ─────────────────────────────────────────────────
+// This was missing — real API testing requests were rendered directly
+// without adaptation, so `t.agency` (a nested object: {name, city, user})
+// got passed straight into JSX as a child, which React cannot render and
+// throws immediately.
+export function adaptTestingRequest(t) {
+  if (!t) return null;
+  return {
+    id:         t.id,
+    agency:     t.agency?.name || t.agency?.user?.profile?.fullName || 'Testing Agency',
+    agencyCity: t.agency?.city || '',
+    product:    t._product?.name || t.productId || 'Product',
+    services:   t.servicesRequested || [],
+    status:     t.status?.toLowerCase(),
+    report:     !!t.reportUrl,
+    reportUrl:  t.reportUrl || null,
+    fee:        Number(t.fee || 0),
+    date:       t.scheduledDate?.slice(0, 10) || t.createdAt?.slice(0, 10) || '',
+    _raw: t,
+  };
+}
+
+export function adaptTestingRequests(list = []) {
+  return list.map(adaptTestingRequest);
+}
+
 function timeAgo(dateStr) {
   if (!dateStr) return '';
   const diff = Date.now() - new Date(dateStr).getTime();

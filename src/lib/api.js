@@ -79,23 +79,23 @@ async function tryRefresh() {
 export async function apiRegister({ phoneNumber, email, password, role, fullName }) {
   return apiFetch('/auth/register', {
     method: 'POST',
-    body: JSON.stringify({ phoneNumber, email, password, role, fullName }),
+    body: JSON.stringify({ phoneNumber: phoneNumber || undefined, email: email || undefined, password, role, fullName }),
   });
 }
 
-export async function apiVerifyOtp({ phoneNumber, otp, purpose = 'phone_verify' }) {
-  const data = await apiFetch('/auth/verify-otp', {
+export async function apiVerifyOtp({ identifier, otp, purpose = 'phone_verify' }) {
+  // No longer auto-logs the user in — verifying OTP moves the account to
+  // "pending admin approval," it does not grant tokens.
+  return apiFetch('/auth/verify-otp', {
     method: 'POST',
-    body: JSON.stringify({ phoneNumber, otp, purpose }),
+    body: JSON.stringify({ identifier, otp, purpose }),
   });
-  if (data?.accessToken) setAccessToken(data.accessToken);
-  return data;
 }
 
-export async function apiLogin({ phoneNumber, password }) {
+export async function apiLogin({ identifier, password }) {
   const data = await apiFetch('/auth/login', {
     method: 'POST',
-    body: JSON.stringify({ phoneNumber, password }),
+    body: JSON.stringify({ identifier, password }),
   });
   if (data?.accessToken) setAccessToken(data.accessToken);
   return data;
@@ -126,18 +126,38 @@ export async function apiSubmitKyc(formData) {
   return data;
 }
 
-export async function apiForgotPassword(phoneNumber) {
+export async function apiForgotPassword(identifier) {
   return apiFetch('/auth/forgot-password', {
     method: 'POST',
-    body: JSON.stringify({ phoneNumber }),
+    body: JSON.stringify({ identifier }),
   });
 }
 
-export async function apiResetPassword({ phoneNumber, otp, newPassword }) {
+export async function apiResetPassword({ identifier, otp, newPassword }) {
   return apiFetch('/auth/reset-password', {
     method: 'POST',
-    body: JSON.stringify({ phoneNumber, otp, newPassword }),
+    body: JSON.stringify({ identifier, otp, newPassword }),
   });
+}
+
+// ─── SELF-SERVICE ───────────────────────────────────────────────────────────
+export async function apiChangePassword({ currentPassword, newPassword }) {
+  return apiFetch('/auth/change-password', {
+    method: 'POST',
+    body: JSON.stringify({ currentPassword, newPassword }),
+  });
+}
+
+export async function apiDeactivateSelf() {
+  return apiFetch('/auth/deactivate-self', { method: 'POST' });
+}
+
+export async function apiGetMyDocuments() {
+  return apiFetch('/auth/my-documents');
+}
+
+export async function apiGetMyActivity() {
+  return apiFetch('/auth/my-activity');
 }
 
 // ─── USERS ─────────────────────────────────────────────────────────────────────
@@ -517,4 +537,81 @@ export async function apiAdminDeactivateUnit(id) {
 
 export async function apiAdminReactivateUnit(id) {
   return apiFetch(`/units/admin/${id}/reactivate`, { method: 'PATCH' });
+}
+
+// ─── ADMIN: USER MANAGEMENT ──────────────────────────────────────────────────
+export async function apiAdminCreateUser({ phoneNumber, email, fullName, role, password }) {
+  return apiFetch('/auth/admin/create-user', {
+    method: 'POST',
+    body: JSON.stringify({ phoneNumber: phoneNumber || undefined, email: email || undefined, fullName, role, password: password || undefined }),
+  });
+}
+
+export async function apiAdminResetUserPassword(userId, newPassword) {
+  return apiFetch(`/auth/admin/${userId}/reset-password`, {
+    method: 'POST',
+    body: JSON.stringify({ newPassword: newPassword || undefined }),
+  });
+}
+
+// ─── MODERATOR (delegated staff) ────────────────────────────────────────────
+export async function apiModeratorRecommend(userId, note) {
+  return apiFetch(`/auth/moderator/${userId}/recommend`, {
+    method: 'POST',
+    body: JSON.stringify({ note }),
+  });
+}
+
+// ─── ADMIN: DELIST SERVICE LISTINGS ─────────────────────────────────────────
+export async function apiAdminSetTestingAgencyActive(id, isActive) {
+  return apiFetch(`/testing/admin/${id}/active`, { method: 'PATCH', body: JSON.stringify({ isActive }) });
+}
+
+export async function apiAdminGetAllAgencies() {
+  return apiFetch('/testing/admin/all');
+}
+
+export async function apiAdminSetTransportActive(id, isActive) {
+  return apiFetch(`/transport/admin/${id}/active`, { method: 'PATCH', body: JSON.stringify({ isActive }) });
+}
+
+export async function apiAdminGetAllTransporters() {
+  return apiFetch('/transport/admin/all');
+}
+
+export async function apiAdminSetWarehouseActive(id, isActive) {
+  return apiFetch(`/warehouse/admin/${id}/active`, { method: 'PATCH', body: JSON.stringify({ isActive }) });
+}
+
+// ─── LISTING MEDIA (warehouse / testing agency / transport) ────────────────
+export async function apiGetListingMedia(entityType, entityId) {
+  return apiFetch(`/media/${entityType}/${entityId}`);
+}
+
+export async function apiUploadListingMedia(entityType, entityId, files, type = 'image') {
+  const token = getToken();
+  const BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1';
+  const formData = new FormData();
+  files.forEach((f) => formData.append('files', f));
+  const res = await fetch(`${BASE}/media/${entityType}/${entityId}?type=${type}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    credentials: 'include',
+    body: formData,
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error?.message || 'Upload failed');
+  return data;
+}
+
+export async function apiSetListingMediaPrimary(mediaId) {
+  return apiFetch(`/media/${mediaId}/set-primary`, { method: 'PATCH' });
+}
+
+export async function apiDeleteListingMedia(mediaId) {
+  return apiFetch(`/media/${mediaId}`, { method: 'DELETE' });
+}
+
+export async function apiSetProductMediaPrimary(mediaId) {
+  return apiFetch(`/products/media/${mediaId}/set-primary`, { method: 'PATCH' });
 }

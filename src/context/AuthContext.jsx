@@ -38,8 +38,8 @@ export function AuthProvider({ children }) {
     })();
   }, []);
 
-  const login = async (phoneNumber, password) => {
-    const result = await apiLogin({ phoneNumber, password });
+  const login = async (identifier, password) => {
+    const result = await apiLogin({ identifier, password });
     const adapted = adaptUser(result.user);
     setUser(adapted);
     return adapted;

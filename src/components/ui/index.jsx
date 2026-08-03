@@ -115,7 +115,7 @@ export const MetricPill = ({ label, val, ok }) => (
   </div>
 );
 
-export const Modal = ({ children, onClose, title }) => (
+export const Modal = ({ children, onClose, title, closeOnBackdrop = true }) => (
   <div
     style={{
       position: 'fixed', inset: 0,
@@ -123,7 +123,7 @@ export const Modal = ({ children, onClose, title }) => (
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       zIndex: 1000, padding: 16,
     }}
-    onClick={e => e.target === e.currentTarget && onClose()}
+    onClick={e => closeOnBackdrop && e.target === e.currentTarget && onClose()}
   >
     <div style={{
       background: T.white, borderRadius: 16, padding: 28,

@@ -13,13 +13,17 @@ export function TestingPage() {
   const [selected, setSelected] = useState(null);
   const [booked, setBooked]     = useState(false);
   const [product, setProduct]   = useState('');
+  const [search, setSearch]     = useState('');
 
   useEffect(() => {
-    apiGetAgencies()
-      .then(data => setAgencies(adaptAgencies(Array.isArray(data) ? data : [])))
-      .catch(() => setAgencies(MOCK_A))
-      .finally(() => setLoading(false));
-  }, []);
+    const timer = setTimeout(() => {
+      apiGetAgencies(search ? { search } : {})
+        .then(data => setAgencies(adaptAgencies(Array.isArray(data) ? data : [])))
+        .catch(() => setAgencies(MOCK_A))
+        .finally(() => setLoading(false));
+    }, search ? 300 : 0); // small debounce while typing, instant on first load
+    return () => clearTimeout(timer);
+  }, [search]);
 
   const handleBook = async () => {
     try {
@@ -37,6 +41,11 @@ export function TestingPage() {
       <div style={{ marginBottom: 28 }}>
         <h1 style={{ margin: 0, fontSize: 22, fontWeight: 900, color: T.green }}>🧪 Testing & Inspection Agencies</h1>
         <p style={{ margin: '5px 0 0', color: T.muted, fontSize: 13 }}>Certified laboratories for grain quality analysis, moisture testing, and export certification</p>
+        <div style={{ position: 'relative', maxWidth: 340, marginTop: 14 }}>
+          <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: T.muted, fontSize: 14 }}>🔍</span>
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search lab name…"
+            style={{ width: '100%', padding: '9px 12px 9px 34px', border: `1.5px solid ${T.border}`, borderRadius: 8, fontSize: 13, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' }} />
+        </div>
       </div>
 
       {loading ? (
@@ -130,13 +139,17 @@ export function TransportPage() {
   const [booked, setBooked]             = useState(false);
   const [from, setFrom]                 = useState('');
   const [to, setTo]                     = useState('');
+  const [search, setSearch]             = useState('');
 
   useEffect(() => {
-    apiGetTransporters()
-      .then(data => setTransporters(adaptTransporters(Array.isArray(data) ? data : [])))
-      .catch(() => setTransporters(MOCK_T))
-      .finally(() => setLoading(false));
-  }, []);
+    const timer = setTimeout(() => {
+      apiGetTransporters(search ? { search } : {})
+        .then(data => setTransporters(adaptTransporters(Array.isArray(data) ? data : [])))
+        .catch(() => setTransporters(MOCK_T))
+        .finally(() => setLoading(false));
+    }, search ? 300 : 0);
+    return () => clearTimeout(timer);
+  }, [search]);
 
   const handleBook = async () => {
     try {
@@ -160,6 +173,11 @@ export function TransportPage() {
       <div style={{ marginBottom: 24 }}>
         <h1 style={{ margin: 0, fontSize: 22, fontWeight: 900, color: T.green }}>🚛 Transport & Logistics</h1>
         <p style={{ margin: '5px 0 0', color: T.muted, fontSize: 13 }}>Vetted transport providers with GPS tracking and insurance across all of Pakistan</p>
+        <div style={{ position: 'relative', maxWidth: 340, marginTop: 14 }}>
+          <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: T.muted, fontSize: 14 }}>🔍</span>
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search company name…"
+            style={{ width: '100%', padding: '9px 12px 9px 34px', border: `1.5px solid ${T.border}`, borderRadius: 8, fontSize: 13, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' }} />
+        </div>
       </div>
 
       {/* Route search */}

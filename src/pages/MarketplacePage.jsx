@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import ProductCard from '../components/ProductCard';
 import { Card } from '../components/ui';
-import { apiGetProducts, apiGetCategories } from '../lib/api';
+import { apiGetProducts, apiGetCategories, apiGetCities } from '../lib/api';
 import { adaptProducts } from '../lib/adapters';
 import { PRODUCTS as MOCK } from '../data';
 import T from '../theme';
@@ -12,6 +12,8 @@ export default function MarketplacePage() {
   const [search,       setSearch]       = useState(searchParams.get('q') || '');
   const [cat,          setCat]          = useState('All');
   const [province,     setProvince]     = useState('All');
+  const [city,         setCity]         = useState('All');
+  const [cities,       setCities]       = useState([]);
   const [stage,        setStage]        = useState('All');
   const [maxPrice,     setMaxPrice]     = useState('');
   const [sortBy,       setSortBy]       = useState('featured');
@@ -26,6 +28,12 @@ export default function MarketplacePage() {
   useEffect(() => {
     apiGetCategories().then(setCategories).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    apiGetCities(province !== 'All' ? province : undefined).then(setCities).catch(() => setCities([]));
+    setCity('All'); // previously-selected city may not exist in the new province
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [province]);
   const [loading,      setLoading]      = useState(true);
 
   // Fetch from API whenever filters change
@@ -35,6 +43,7 @@ export default function MarketplacePage() {
       ...(search       && { search }),
       ...(cat !== 'All'      && { category: cat }),
       ...(province !== 'All' && { province }),
+      ...(city !== 'All'     && { city }),
       ...(stage !== 'All'    && { stage }),
       ...(maxPrice           && { maxPrice: Number(maxPrice) }),
       ...(verifiedOnly       && { verifiedOnly: true }),
@@ -62,10 +71,10 @@ export default function MarketplacePage() {
         setTotal(r.length);
       })
       .finally(() => setLoading(false));
-  }, [search, cat, province, stage, maxPrice, sortBy, verifiedOnly]);
+  }, [search, cat, province, city, stage, maxPrice, sortBy, verifiedOnly]);
 
   const clear = () => {
-    setSearch(''); setCat('All'); setProvince('All');
+    setSearch(''); setCat('All'); setProvince('All'); setCity('All');
     setStage('All'); setMaxPrice(''); setVerifiedOnly(false);
   };
 
@@ -90,7 +99,7 @@ export default function MarketplacePage() {
 
             <div style={{ marginBottom: 13 }}>
               <label style={{ fontSize: 10, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5, letterSpacing: 0.5 }}>SEARCH</label>
-              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Variety, seller…" style={inputStyle} />
+              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Variety, seller, category…" style={inputStyle} />
             </div>
 
             <div style={{ marginBottom: 13 }}>
@@ -116,6 +125,14 @@ export default function MarketplacePage() {
               <label style={{ fontSize: 10, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5, letterSpacing: 0.5 }}>PROVINCE</label>
               <select value={province} onChange={e => setProvince(e.target.value)} style={{ ...inputStyle, padding: '8px 10px' }}>
                 {['All', 'Punjab', 'Sindh', 'KPK', 'Balochistan'].map(p => <option key={p}>{p}</option>)}
+              </select>
+            </div>
+
+            <div style={{ marginBottom: 13 }}>
+              <label style={{ fontSize: 10, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5, letterSpacing: 0.5 }}>CITY</label>
+              <select value={city} onChange={e => setCity(e.target.value)} style={{ ...inputStyle, padding: '8px 10px' }}>
+                <option value="All">All Cities</option>
+                {cities.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
               </select>
             </div>
 
