@@ -2,8 +2,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Btn } from './ui';
 import T from '../theme';
-
-const SELLER_ROLES = ['trader', 'farmer', 'miller'];
+import { portalPathForRole, portalIconForRole } from '../lib/roles';
 
 export default function Navbar() {
   const navigate = useNavigate();
@@ -58,10 +57,21 @@ export default function Navbar() {
           {user ? (
             <>
               <button
-                onClick={() => navigate(user.role === 'admin' ? '/admin' : SELLER_ROLES.includes(user.role) ? '/seller' : '/buyer')}
+                onClick={() => navigate(portalPathForRole(user.role))}
                 style={{ background: 'rgba(116,198,157,0.15)', border: '1px solid rgba(116,198,157,0.3)', color: T.mint, padding: '7px 14px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 12, fontFamily: 'inherit' }}
               >
-                {user.role === 'admin' ? '🔐' : SELLER_ROLES.includes(user.role) ? '📦' : '🛒'} My Portal
+                {portalIconForRole(user.role)} My Portal
+              </button>
+              <button
+                onClick={() => navigate('/account')}
+                title="My Account"
+                style={{
+                  background: pathname === '/account' ? 'rgba(255,255,255,0.16)' : 'none',
+                  border: '1px solid rgba(255,255,255,0.2)', color: 'rgba(255,255,255,0.85)',
+                  padding: '7px 10px', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontFamily: 'inherit',
+                }}
+              >
+                👤
               </button>
               <button
                 onClick={logout}

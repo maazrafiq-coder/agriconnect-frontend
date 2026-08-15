@@ -4,6 +4,7 @@ import { adaptOffers, adaptOrders, adaptProducts } from '../lib/adapters';
 import { useNavigate } from 'react-router-dom';
 import { PRODUCTS } from '../data';
 import { Card, Btn, Badge, Tabs, Modal } from '../components/ui';
+import MediaManagerModal from '../components/MediaManager';
 import { STATUS_COLORS as SC } from '../data';
 import T from '../theme';
 
@@ -39,6 +40,7 @@ export default function SellerDashboard() {
   const [declineModal, setDeclineModal] = useState(null);
   const [counterModal, setCounterModal] = useState(null);
   const [newListingModal, setNewListingModal] = useState(false);
+  const [mediaModalProduct, setMediaModalProduct] = useState(null);
   const [activeConvo, setActiveConvo] = useState(0);
   const [msgInput, setMsgInput] = useState('');
   const [chatMessages, setChatMessages] = useState(MESSAGES[0].chat);
@@ -147,16 +149,19 @@ export default function SellerDashboard() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(250px,1fr))', gap: 14 }}>
           {myListings.map(p => (
             <Card key={p.id} style={{ padding: 0, overflow: 'hidden' }}>
-              <div style={{ height: 90, background: 'linear-gradient(135deg,#74C69D22,#B7A05A22)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 36, position: 'relative' }}>
-                🌾
+              <div style={{ height: 90, background: p.images?.[0] ? `url(${p.images[0]}) center/cover no-repeat` : 'linear-gradient(135deg,#74C69D22,#B7A05A22)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 36, position: 'relative' }}>
+                {!p.images?.[0] && '🌾'}
                 <div style={{ position: 'absolute', top: 8, right: 8 }}><Badge label="Active" type="green" /></div>
               </div>
               <div style={{ padding: '12px 14px' }}>
                 <div style={{ fontWeight: 700, fontSize: 13, color: T.green, marginBottom: 3 }}>{p.name}</div>
                 <div style={{ fontSize: 11, color: T.muted, marginBottom: 8 }}>{p.qty} {p.unit} · ₨{p.price.toLocaleString()}/bag</div>
-                <div style={{ display: 'flex', gap: 6 }}>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                   <Btn variant="secondary" size="sm" onClick={() => navigate(`/product/${p.id}`)}>View</Btn>
                   <Btn variant="ghost" size="sm" onClick={() => setNewListingModal(true)}>Edit</Btn>
+                  <Btn variant="ghost" size="sm" onClick={() => setMediaModalProduct(p)}>
+                    📷 {p.images?.length ? `Photos (${p.images.length})` : 'Add Photos'}
+                  </Btn>
                   <Btn variant="ghost" size="sm" onClick={async () => {
                     try {
                       await apiChangeProductStatus(p._raw?.id || p.id, p.status === 'PAUSED' ? 'ACTIVE' : 'PAUSED');
@@ -349,6 +354,20 @@ export default function SellerDashboard() {
           onCreated={(created) => {
             setMyListings(prev => [adaptProducts([created])[0], ...prev]);
             setNewListingModal(false);
+          }}
+        />
+      )}
+
+      {mediaModalProduct && (
+        <MediaManagerModal
+          mode="product"
+          entityId={mediaModalProduct._raw?.id || mediaModalProduct.id}
+          title={`Photos & Documents — ${mediaModalProduct.name}`}
+          onClose={() => setMediaModalProduct(null)}
+          onPrimaryChange={(url) => {
+            setMyListings(prev => prev.map(x =>
+              x.id === mediaModalProduct.id ? { ...x, images: [url, ...(x.images || []).filter(u => u !== url)] } : x
+            ));
           }}
         />
       )}

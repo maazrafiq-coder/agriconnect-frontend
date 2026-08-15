@@ -12,20 +12,20 @@ import WarehousePage from './pages/WarehousePage';
 import SellerDashboard  from './pages/SellerDashboard';
 import BuyerDashboard   from './pages/BuyerDashboard';
 import AdminDashboard   from './pages/AdminDashboard';
-
-// Backend UserRole enum values that count as "seller" for route-guard
-// purposes. adaptUser() lowercases the raw enum (TRADER -> 'trader'),
-// so this must be checked against the enum's actual values, not the
-// literal string 'seller' (which isn't a UserRole value at all).
-const SELLER_ROLES = ['trader', 'farmer', 'miller'];
+import AccountPage      from './pages/AccountPage';
+import WarehouseOperatorDashboard from './pages/WarehouseOperatorDashboard';
+import TestingAgencyDashboard     from './pages/TestingAgencyDashboard';
+import TransportProviderDashboard from './pages/TransportProviderDashboard';
+import { SELLER_ROLES } from './lib/roles';
 
 // Protected route wrapper
-function ProtectedRoute({ children, requireSeller, requireAdmin }) {
+function ProtectedRoute({ children, requireSeller, requireAdmin, requireRole }) {
   const { user, loading } = useAuth();
   if (loading) return null; // wait for session rehydration before deciding
   if (!user) return <Navigate to="/" replace />;
   if (requireAdmin && user.role !== 'admin') return <Navigate to="/" replace />;
   if (requireSeller && !SELLER_ROLES.includes(user.role)) return <Navigate to="/" replace />;
+  if (requireRole && user.role !== requireRole) return <Navigate to="/" replace />;
   return children;
 }
 
@@ -45,6 +45,10 @@ function AppInner() {
         <Route path="/seller"      element={<ProtectedRoute requireSeller><SellerDashboard /></ProtectedRoute>} />
         <Route path="/buyer"       element={<ProtectedRoute><BuyerDashboard /></ProtectedRoute>} />
         <Route path="/admin"       element={<ProtectedRoute requireAdmin><AdminDashboard /></ProtectedRoute>} />
+        <Route path="/account"     element={<ProtectedRoute><AccountPage /></ProtectedRoute>} />
+        <Route path="/warehouse-portal" element={<ProtectedRoute requireRole="warehouse"><WarehouseOperatorDashboard /></ProtectedRoute>} />
+        <Route path="/testing-portal"   element={<ProtectedRoute requireRole="testing_agency"><TestingAgencyDashboard /></ProtectedRoute>} />
+        <Route path="/transport-portal" element={<ProtectedRoute requireRole="transporter"><TransportProviderDashboard /></ProtectedRoute>} />
         <Route path="*"            element={<Navigate to="/" replace />} />
       </Routes>
 

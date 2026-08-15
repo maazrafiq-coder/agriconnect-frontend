@@ -115,7 +115,7 @@ export const MetricPill = ({ label, val, ok }) => (
   </div>
 );
 
-export const Modal = ({ children, onClose, title, closeOnBackdrop = true }) => (
+export const Modal = ({ children, onClose, title, closeOnBackdrop = true, width = 480 }) => (
   <div
     style={{
       position: 'fixed', inset: 0,
@@ -127,7 +127,7 @@ export const Modal = ({ children, onClose, title, closeOnBackdrop = true }) => (
   >
     <div style={{
       background: T.white, borderRadius: 16, padding: 28,
-      maxWidth: 480, width: '100%',
+      maxWidth: width, width: '100%',
       maxHeight: '90vh', overflowY: 'auto',
       boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
     }}>

@@ -8,6 +8,8 @@
  * they always receive data through these adapters.
  */
 
+import { resolveMediaUrl } from './api';
+
 // ─── BADGE LOGIC ──────────────────────────────────────────────────────────────
 function deriveBadge(product) {
   const v = product.riceDetails?.variety || '';
@@ -76,8 +78,12 @@ export function adaptProduct(p) {
       chalk:     p.riceDetails?.chalkinessPct ?? null,
       milling:   p.riceDetails?.millingYieldPct ?? null,
     },
-    // Media
-    images:         (p.media || []).filter((m) => m.type === 'image').map((m) => m.url),
+    // Media — primary/display picture always first, regardless of what
+    // order the backend returned records in.
+    images:         (p.media || [])
+                      .filter((m) => m.type === 'image')
+                      .sort((a, b) => (b.isPrimary ? 1 : 0) - (a.isPrimary ? 1 : 0) || (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+                      .map((m) => resolveMediaUrl(m.url)),
     // Raw detail for product detail page
     _raw: p,
   };

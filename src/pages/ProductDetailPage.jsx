@@ -23,6 +23,7 @@ export default function ProductDetailPage() {
   const [offerSent,   setOfferSent]   = useState(false);
   const [booked,      setBooked]      = useState(false);
   const [offerError,  setOfferError]  = useState('');
+  const [activeImage, setActiveImage] = useState(0);
 
   useEffect(() => {
     setLoading(true);
@@ -93,7 +94,24 @@ export default function ProductDetailPage() {
         {/* ── Left column ── */}
         <div>
           <Card style={{ padding: 0, overflow: 'hidden', marginBottom: 18 }}>
-            <div style={{ height: 200, background: 'linear-gradient(135deg,#74C69D22,#B7A05A33,#1A3A2A22)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 80 }}>🌾</div>
+            <div style={{ height: 200, background: p.images?.[activeImage] ? `url(${p.images[activeImage]}) center/cover no-repeat` : 'linear-gradient(135deg,#74C69D22,#B7A05A33,#1A3A2A22)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 80 }}>
+              {!p.images?.length && '🌾'}
+            </div>
+            {p.images?.length > 1 && (
+              <div style={{ display: 'flex', gap: 6, padding: '10px 24px 0' }}>
+                {p.images.map((url, i) => (
+                  <div
+                    key={url}
+                    onClick={() => setActiveImage(i)}
+                    style={{
+                      width: 52, height: 52, borderRadius: 8, cursor: 'pointer', flexShrink: 0,
+                      background: `url(${url}) center/cover no-repeat`,
+                      border: `2px solid ${i === activeImage ? T.gold : 'transparent'}`,
+                    }}
+                  />
+                ))}
+              </div>
+            )}
             <div style={{ padding: '22px 24px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
                 <div>

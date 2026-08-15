@@ -14,6 +14,21 @@
 
 const BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1';
 
+// Uploaded files (product photos, KYC docs, listing media, etc.) are stored
+// with paths relative to the API's origin (e.g. "/uploads/products/x.jpg"),
+// served by a static file handler that sits outside the "/api/v1" prefix.
+// Turn one of those into a URL a browser can actually load.
+export function resolveMediaUrl(url) {
+  if (!url) return url;
+  if (/^https?:\/\//i.test(url)) return url;
+  try {
+    const origin = new URL(BASE).origin;
+    return `${origin}${url.startsWith('/') ? '' : '/'}${url}`;
+  } catch {
+    return url;
+  }
+}
+
 // ─── IN-MEMORY ACCESS TOKEN ────────────────────────────────────────────────────
 let accessToken = null;
 export const getToken = () => accessToken;
@@ -43,8 +58,18 @@ async function apiFetch(path, options = {}) {
       return apiFetch(path, { ...options, _retry: true });
     }
     clearTokens();
-    window.location.href = '/';
-    return;
+    // NOTE: previously this did a hard `window.location.href = '/'` here,
+    // which force-navigated the *entire app* to the home page any time any
+    // 401 happened — including optional/authenticated calls made from
+    // public pages (e.g. WarehousePage calling apiGetMyReceipts() for a
+    // guest). That's what caused "click Warehouses -> flashes -> bounced
+    // to Home": the page mounted fine, then its receipts call 401'd, the
+    // refresh failed (no session), and this line yanked the user away.
+    // Real auth gating is already handled by <ProtectedRoute> in App.jsx
+    // and by AuthContext's own silent-refresh-on-boot effect, so we just
+    // throw here and let each call site's existing .catch() decide what
+    // to do (WarehousePage already falls back to mock data, for example).
+    throw new Error('Unauthorized');
   }
 
   const data = await res.json().catch(() => ({}));
@@ -211,6 +236,11 @@ export async function apiChangeProductStatus(id, status) {
   });
 }
 
+// ─── PRODUCT MEDIA (display picture + docs on a marketplace listing) ───────────
+// apiUploadProductMedia / apiSetProductMediaPrimary are defined further down
+// in this file (kept there from when the backend endpoints were first
+// scaffolded) — see the "PRODUCT MEDIA" note near apiToggleSaveProduct.
+
 export async function apiToggleSaveProduct(id) {
   return apiFetch(`/products/${id}/save`, { method: 'POST' });
 }
@@ -335,6 +365,23 @@ export async function apiGetWarehouseDashboard() {
   return apiFetch('/warehouse/dashboard/operator');
 }
 
+export async function apiRegisterWarehouse(data) {
+  return apiFetch('/warehouse/register', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function apiIssueReceipt(bookingId, { qualityMetrics, actualQuantityTons }) {
+  return apiFetch(`/warehouse/receipts/issue/${bookingId}`, {
+    method: 'POST',
+    body: JSON.stringify({ qualityMetrics, actualQuantityTons }),
+  });
+}
+
+// ─── MEDIA — GENERIC LISTINGS (warehouse / testing_agency / transport) ────────
+// apiGetListingMedia / apiUploadListingMedia / apiSetListingMediaPrimary /
+// apiDeleteListingMedia are defined further down in this file, near the
+// admin warehouse/transport/testing endpoints (kept there from when the
+// backend media endpoints were first scaffolded).
+
 // ─── TESTING ───────────────────────────────────────────────────────────────────
 export async function apiGetAgencies(params = {}) {
   const qs = new URLSearchParams(
@@ -360,6 +407,26 @@ export async function apiUpdateTestingStatus(requestId, status) {
     method: 'PATCH',
     body: JSON.stringify({ status }),
   });
+}
+
+export async function apiSubmitTestingReport(requestId, { reportUrl, reportData }) {
+  return apiFetch(`/testing/requests/${requestId}/report`, {
+    method: 'POST',
+    body: JSON.stringify({ reportUrl, reportData }),
+  });
+}
+
+// ─── TESTING AGENCY — OPERATOR SELF-SERVICE ────────────────────────────────
+export async function apiRegisterAgency(data) {
+  return apiFetch('/testing/register', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function apiGetMyAgency() {
+  return apiFetch('/testing/my-agency');
+}
+
+export async function apiUpdateMyAgency(data) {
+  return apiFetch('/testing/my-agency', { method: 'PATCH', body: JSON.stringify(data) });
 }
 
 // ─── TRANSPORT ─────────────────────────────────────────────────────────────────
@@ -395,6 +462,19 @@ export async function apiUpdateTracking(requestId, data) {
     method: 'PATCH',
     body: JSON.stringify(data),
   });
+}
+
+// ─── TRANSPORT PROVIDER — OPERATOR SELF-SERVICE ────────────────────────────
+export async function apiRegisterProvider(data) {
+  return apiFetch('/transport/register', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function apiGetMyProvider() {
+  return apiFetch('/transport/my-provider');
+}
+
+export async function apiUpdateMyProvider(data) {
+  return apiFetch('/transport/my-provider', { method: 'PATCH', body: JSON.stringify(data) });
 }
 
 // ─── ADMIN ─────────────────────────────────────────────────────────────────────

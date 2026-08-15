@@ -17,8 +17,8 @@ export default function ProductCard({ product: p }) {
       onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 6px 20px rgba(0,0,0,0.10)'; }}
       onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 1px 4px rgba(0,0,0,0.04)'; }}
     >
-      <div style={{ height: 120, background: 'linear-gradient(135deg,#74C69D22,#B7A05A22,#1A3A2A11)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 48, position: 'relative' }}>
-        🌾
+      <div style={{ height: 120, background: p.images?.[0] ? `url(${p.images[0]}) center/cover no-repeat` : 'linear-gradient(135deg,#74C69D22,#B7A05A22,#1A3A2A11)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 48, position: 'relative' }}>
+        {!p.images?.[0] && '🌾'}
         <div style={{ position: 'absolute', top: 10, right: 10 }}>
           <Badge label={p.badge} type={BADGE_TYPE[p.badge] || 'green'} />
         </div>
