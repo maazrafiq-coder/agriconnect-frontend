@@ -4,7 +4,7 @@ import { apiGetProduct, apiSubmitOffer, apiBookTesting } from '../lib/api';
 import { adaptProduct, adaptAgencies, toOfferRequest } from '../lib/adapters';
 import { apiGetAgencies } from '../lib/api';
 import { PRODUCTS as MOCK, AGENCIES as MOCK_AGENCIES } from '../data';
-import { Badge, Btn, Card, Stars, Modal, MetricPill } from '../components/ui';
+import { Badge, Btn, Card, Stars, Modal, MetricPill, ErrorState, isDemoMode } from '../components/ui';
 import T from '../theme';
 
 export default function ProductDetailPage() {
@@ -14,6 +14,7 @@ export default function ProductDetailPage() {
   const [p,           setP]           = useState(null);
   const [agencies,    setAgencies]    = useState([]);
   const [loading,     setLoading]     = useState(true);
+  const [loadError,   setLoadError]   = useState(null);
   const [offerModal,  setOfferModal]  = useState(false);
   const [testModal,   setTestModal]   = useState(false);
   const [bookAgency,  setBookAgency]  = useState(null);
@@ -23,23 +24,38 @@ export default function ProductDetailPage() {
   const [offerSent,   setOfferSent]   = useState(false);
   const [booked,      setBooked]      = useState(false);
   const [offerError,  setOfferError]  = useState('');
+  const [testError,   setTestError]   = useState('');
   const [activeImage, setActiveImage] = useState(0);
 
-  useEffect(() => {
+  const load = () => {
     setLoading(true);
+    setLoadError(null);
     Promise.all([
-      apiGetProduct(id).then(adaptProduct).catch(() => {
-        const mock = MOCK.find(x => String(x.id) === String(id));
-        return mock || MOCK[0];
-      }),
-      apiGetAgencies().then(r => adaptAgencies(r || [])).catch(() => MOCK_AGENCIES),
+      apiGetProduct(id).then(adaptProduct),
+      apiGetAgencies().then(r => adaptAgencies(r || [])).catch(() => (isDemoMode() ? MOCK_AGENCIES : [])),
     ]).then(([product, agList]) => {
       setP(product);
       setOfferPrice(String(product.price));
       setOfferQty(String(product.minOrder));
       setAgencies(agList);
+    }).catch(err => {
+      // A real "product not found or API failed" must surface as such —
+      // silently substituting an unrelated mock product would show the
+      // wrong listing (wrong price, wrong seller) without any indication.
+      if (isDemoMode()) {
+        const mock = MOCK.find(x => String(x.id) === String(id)) || MOCK[0];
+        setP(mock);
+        setOfferPrice(String(mock.price));
+        setOfferQty(String(mock.minOrder));
+        setAgencies(MOCK_AGENCIES);
+      } else {
+        setP(null);
+        setLoadError(err?.message || 'This product could not be loaded.');
+      }
     }).finally(() => setLoading(false));
-  }, [id]);
+  };
+
+  useEffect(load, [id]);
 
   const handleOffer = async () => {
     setOfferError('');
@@ -52,18 +68,25 @@ export default function ProductDetailPage() {
   };
 
   const handleBookTest = async () => {
+    setTestError('');
     try {
       await apiBookTesting({ agencyId: bookAgency.userId || bookAgency.id, productId: p._raw?.id || p.id, servicesRequested: bookAgency.services });
       setBooked(true);
-    } catch {
-      setBooked(true); // Show success anyway in demo
+    } catch (err) {
+      setTestError(err?.message || 'Failed to book testing. Please try again.');
     }
   };
 
-  if (loading || !p) return (
+  if (loading) return (
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: '60px 20px', textAlign: 'center', color: T.muted }}>
       <div style={{ fontSize: 40, marginBottom: 16 }}>🌾</div>
       <p>Loading product…</p>
+    </div>
+  );
+
+  if (loadError || !p) return (
+    <div style={{ maxWidth: 700, margin: '0 auto', padding: '60px 20px' }}>
+      <ErrorState message={loadError || 'This product could not be found.'} onRetry={load} />
     </div>
   );
 
@@ -229,7 +252,7 @@ export default function ProductDetailPage() {
         <Modal title="Request Lab Testing" onClose={() => setTestModal(false)}>
           <p style={{ color: T.muted, fontSize: 13, marginBottom: 16 }}>Select a certified testing agency to verify this product's quality metrics.</p>
           {agencies.slice(0, 3).map(a => (
-            <div key={a.id} onClick={() => setBookAgency(a)} style={{ border: `2px solid ${T.border}`, borderRadius: 10, padding: 14, marginBottom: 10, cursor: 'pointer' }}>
+            <div key={a.id} onClick={() => { setTestError(''); setBookAgency(a); }} style={{ border: `2px solid ${T.border}`, borderRadius: 10, padding: 14, marginBottom: 10, cursor: 'pointer' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div>
                   <div style={{ fontWeight: 700, fontSize: 13, color: T.green }}>{a.name}</div>
@@ -258,6 +281,7 @@ export default function ProductDetailPage() {
             <span style={{ fontSize: 12, color: T.muted }}>Estimated fee</span>
             <span style={{ fontSize: 16, fontWeight: 800, color: T.green }}>₨{bookAgency.price.toLocaleString()}</span>
           </div>
+          {testError && <div style={{ fontSize: 12, color: T.danger, marginBottom: 12, background: '#FEE2E2', padding: '8px 12px', borderRadius: 7 }}>⚠ {testError}</div>}
           <Btn variant="primary" style={{ width: '100%', padding: '11px' }} onClick={handleBookTest}>Confirm & Pay →</Btn>
         </Modal>
       )}

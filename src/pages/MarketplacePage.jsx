@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import ProductCard from '../components/ProductCard';
-import { Card } from '../components/ui';
+import { Card, ErrorState, isDemoMode } from '../components/ui';
 import { apiGetProducts, apiGetCategories, apiGetCities } from '../lib/api';
 import { adaptProducts } from '../lib/adapters';
 import { PRODUCTS as MOCK } from '../data';
@@ -35,10 +35,12 @@ export default function MarketplacePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [province]);
   const [loading,      setLoading]      = useState(true);
+  const [error,        setError]        = useState(null);
 
   // Fetch from API whenever filters change
-  useEffect(() => {
+  const fetchProducts = () => {
     setLoading(true);
+    setError(null);
     const params = {
       ...(search       && { search }),
       ...(cat !== 'All'      && { category: cat }),
@@ -56,22 +58,31 @@ export default function MarketplacePage() {
         setProducts(adaptProducts(res.data || []));
         setTotal(res.meta?.total ?? 0);
       })
-      .catch(() => {
-        // Fallback: filter mock data locally
-        let r = [...MOCK];
-        if (search)      r = r.filter(p => [p.name, p.variety, p.seller, p.location].some(s => s?.toLowerCase().includes(search.toLowerCase())));
-        if (cat !== 'All')      r = r.filter(p => p.cat === cat);
-        if (province !== 'All') r = r.filter(p => p.location?.includes(province));
-        if (maxPrice)    r = r.filter(p => p.price <= Number(maxPrice));
-        if (verifiedOnly) r = r.filter(p => p.sellerVerified);
-        if (sortBy === 'price_asc')  r.sort((a, b) => a.price - b.price);
-        if (sortBy === 'price_desc') r.sort((a, b) => b.price - a.price);
-        if (sortBy === 'rating')     r.sort((a, b) => b.sellerRating - a.sellerRating);
-        setProducts(r);
-        setTotal(r.length);
+      .catch(e => {
+        if (isDemoMode()) {
+          // Demo mode only: filter locally bundled sample data instead of
+          // the live API. Never used as a silent fallback in production.
+          let r = [...MOCK];
+          if (search)      r = r.filter(p => [p.name, p.variety, p.seller, p.location].some(s => s?.toLowerCase().includes(search.toLowerCase())));
+          if (cat !== 'All')      r = r.filter(p => p.cat === cat);
+          if (province !== 'All') r = r.filter(p => p.location?.includes(province));
+          if (maxPrice)    r = r.filter(p => p.price <= Number(maxPrice));
+          if (verifiedOnly) r = r.filter(p => p.sellerVerified);
+          if (sortBy === 'price_asc')  r.sort((a, b) => a.price - b.price);
+          if (sortBy === 'price_desc') r.sort((a, b) => b.price - a.price);
+          if (sortBy === 'rating')     r.sort((a, b) => b.sellerRating - a.sellerRating);
+          setProducts(r);
+          setTotal(r.length);
+        } else {
+          setProducts([]);
+          setTotal(0);
+          setError(e?.message || 'Could not load products from the server.');
+        }
       })
       .finally(() => setLoading(false));
-  }, [search, cat, province, city, stage, maxPrice, sortBy, verifiedOnly]);
+  };
+
+  useEffect(fetchProducts, [search, cat, province, city, stage, maxPrice, sortBy, verifiedOnly]);
 
   const clear = () => {
     setSearch(''); setCat('All'); setProvince('All'); setCity('All');
@@ -179,6 +190,8 @@ export default function MarketplacePage() {
                 </div>
               ))}
             </div>
+          ) : error ? (
+            <ErrorState message={error} onRetry={fetchProducts} />
           ) : products.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '60px 20px', color: T.muted }}>
               <div style={{ fontSize: 52, marginBottom: 14 }}>🔍</div>

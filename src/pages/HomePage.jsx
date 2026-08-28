@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import ProductCard from '../components/ProductCard';
 import Footer from '../components/Footer';
-import { Btn } from '../components/ui';
+import { Btn, LoadingState, ErrorState, EmptyState, isDemoMode } from '../components/ui';
 import { apiGetProducts } from '../lib/api';
 import { adaptProducts } from '../lib/adapters';
 import { PRODUCTS as MOCK_PRODUCTS } from '../data';
@@ -14,12 +14,21 @@ export default function HomePage() {
   const { openRegister } = useAuth();
   const [search, setSearch]     = useState('');
   const [featured, setFeatured] = useState([]);
+  const [featuredState, setFeaturedState] = useState('loading'); // loading | ready | error
 
-  useEffect(() => {
+  const loadFeatured = () => {
+    setFeaturedState('loading');
     apiGetProducts({ limit: 4, sortBy: 'featured' })
-      .then(res => setFeatured(adaptProducts(res.data || [])))
-      .catch(() => setFeatured(MOCK_PRODUCTS.slice(0, 4)));
-  }, []);
+      .then(res => { setFeatured(adaptProducts(res.data || [])); setFeaturedState('ready'); })
+      .catch(() => {
+        // Demo data only ever appears when VITE_DEMO_MODE=true is explicitly
+        // set — never as a silent stand-in for a failed API call.
+        if (isDemoMode()) { setFeatured(MOCK_PRODUCTS.slice(0, 4)); setFeaturedState('ready'); }
+        else setFeaturedState('error');
+      });
+  };
+
+  useEffect(() => { loadFeatured(); }, []);
 
   return (
     <div>
@@ -75,11 +84,18 @@ export default function HomePage() {
           </div>
           <Btn variant="secondary" onClick={() => navigate('/marketplace')}>View All Products →</Btn>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(240px,1fr))', gap: 16 }}>
-          {(featured.length > 0 ? featured : MOCK_PRODUCTS.slice(0, 4)).map(p => (
-            <ProductCard key={p.id} product={p} />
-          ))}
-        </div>
+        {featuredState === 'loading' && <LoadingState label="Loading featured listings…" />}
+        {featuredState === 'error' && <ErrorState message="Could not load featured listings from the server." onRetry={loadFeatured} />}
+        {featuredState === 'ready' && featured.length === 0 && (
+          <EmptyState icon="🌾" title="No featured listings yet" subtitle="Check back soon, or browse the full marketplace." />
+        )}
+        {featuredState === 'ready' && featured.length > 0 && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(240px,1fr))', gap: 16 }}>
+            {featured.map(p => (
+              <ProductCard key={p.id} product={p} />
+            ))}
+          </div>
+        )}
       </div>
 
       {/* HOW IT WORKS */}

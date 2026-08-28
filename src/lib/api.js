@@ -29,6 +29,17 @@ export function resolveMediaUrl(url) {
   }
 }
 
+// KYC document signed-url paths (e.g. "/auth/kyc/documents/file/<token>")
+// are regular API routes — unlike static /uploads paths, they DO live
+// under the "/api/v1" prefix, so they resolve against the full BASE, not
+// just its origin. Kept separate from resolveMediaUrl() to avoid silently
+// stripping that prefix off a path that actually needs it.
+export function resolveApiFileUrl(path) {
+  if (!path) return path;
+  if (/^https?:\/\//i.test(path)) return path;
+  return `${BASE}${path.startsWith('/') ? '' : '/'}${path}`;
+}
+
 // ─── IN-MEMORY ACCESS TOKEN ────────────────────────────────────────────────────
 let accessToken = null;
 export const getToken = () => accessToken;
@@ -36,6 +47,18 @@ export const setAccessToken = (token) => { accessToken = token; };
 export const clearTokens = () => { accessToken = null; };
 // Kept for backward-compat call sites; refresh token is cookie-only now.
 export const setTokens = (access) => setAccessToken(access);
+
+// ─── IN-MEMORY REGISTRATION TOKEN ──────────────────────────────────────────────
+// Short-lived token issued by verify-otp, used ONLY for the KYC submit/status
+// calls a not-yet-approved user makes mid-registration (see backend
+// RegistrationTokenGuard). Same in-memory-only pattern as the access token —
+// never persisted, lost on reload by design (a reload mid-registration just
+// means re-verifying OTP, which is an acceptable tradeoff for not persisting
+// a bearer token in storage).
+let registrationToken = null;
+export const getRegistrationToken = () => registrationToken;
+export const setRegistrationToken = (token) => { registrationToken = token; };
+export const clearRegistrationToken = () => { registrationToken = null; };
 
 // ─── CORE FETCH ───────────────────────────────────────────────────────────────
 async function apiFetch(path, options = {}) {
@@ -110,11 +133,17 @@ export async function apiRegister({ phoneNumber, email, password, role, fullName
 
 export async function apiVerifyOtp({ identifier, otp, purpose = 'phone_verify' }) {
   // No longer auto-logs the user in — verifying OTP moves the account to
-  // "pending admin approval," it does not grant tokens.
-  return apiFetch('/auth/verify-otp', {
+  // "pending admin approval," it does not grant login tokens. It DOES
+  // return a short-lived registrationToken, scoped only to the KYC
+  // submit/status endpoints, so the next step (document upload) has
+  // something valid to authenticate with. Stash it the same way the login
+  // access token is stashed — in memory only.
+  const data = await apiFetch('/auth/verify-otp', {
     method: 'POST',
     body: JSON.stringify({ identifier, otp, purpose }),
   });
+  if (data?.registrationToken) setRegistrationToken(data.registrationToken);
+  return data;
 }
 
 export async function apiLogin({ identifier, password }) {
@@ -139,15 +168,23 @@ export async function apiGetKycStatus() {
   return apiFetch('/auth/kyc/status');
 }
 
+export async function apiGetKycDocumentSignedUrl(docId) {
+  return apiFetch(`/auth/kyc/documents/${docId}/signed-url`);
+}
+
 export async function apiSubmitKyc(formData) {
-  const token = getToken();
+  // Prefer the registration token (mid-registration, not logged in yet).
+  // Falls back to a normal access token for an already-approved user
+  // re-uploading/replacing a document from My Portal -> Documents — the
+  // backend's KycAuthGuard accepts either.
+  const token = getRegistrationToken() || getToken();
   const res = await fetch(`${BASE}/auth/kyc/submit`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
     body: formData, // multipart — don't set Content-Type manually
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data?.error?.message || 'KYC submission failed');
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error?.message || (Array.isArray(data?.message) ? data.message[0] : data?.message) || 'KYC submission failed');
   return data;
 }
 
@@ -338,6 +375,36 @@ export async function apiBookStorage(data) {
   return apiFetch('/warehouse/book', { method: 'POST', body: JSON.stringify(data) });
 }
 
+export async function apiGetMyBookings() {
+  return apiFetch('/warehouse/bookings/my');
+}
+
+export async function apiGetBooking(id) {
+  return apiFetch(`/warehouse/bookings/${id}`);
+}
+
+export async function apiAcceptBooking(id) {
+  return apiFetch(`/warehouse/bookings/${id}/accept`, { method: 'PATCH' });
+}
+
+export async function apiRejectBooking(id, reason) {
+  return apiFetch(`/warehouse/bookings/${id}/reject`, {
+    method: 'PATCH',
+    body: JSON.stringify({ reason }),
+  });
+}
+
+export async function apiCancelBooking(id, reason) {
+  return apiFetch(`/warehouse/bookings/${id}/cancel`, {
+    method: 'PATCH',
+    body: JSON.stringify({ reason }),
+  });
+}
+
+export async function apiCompleteBooking(id) {
+  return apiFetch(`/warehouse/bookings/${id}/complete`, { method: 'PATCH' });
+}
+
 export async function apiGetMyReceipts() {
   return apiFetch('/warehouse/receipts/my');
 }
@@ -483,11 +550,73 @@ export async function apiAdminGetUsers(params = {}) {
   return apiFetch(`/users/admin/list${qs ? `?${qs}` : ''}`);
 }
 
+export async function apiAdminGetUserDetail(userId) {
+  return apiFetch(`/users/admin/${userId}/detail`);
+}
+
 export async function apiAdminUpdateKyc(userId, status, note) {
   return apiFetch(`/users/admin/${userId}/kyc`, {
     method: 'PATCH',
     body: JSON.stringify({ status, note }),
   });
+}
+
+// ─── KYC CLARIFICATION THREAD (Round 2 Milestone 3) ────────────────────────
+// Reusable request/respond/resolve workflow — see ReviewClarification in
+// the backend schema. Round 2 Milestone 6 reuses this same workflow for
+// provider profile review (warehouse/testing agency/transport listings)
+// — see the PROVIDER LISTING CLARIFICATION section further down.
+export async function apiGetMyKycClarifications() {
+  return apiFetch('/review/clarifications/my/kyc');
+}
+
+// Generic: opens a new clarification request against any supported
+// subjectType (USER_KYC has its own specialized wrapper —
+// apiAdminUpdateKyc with status 'INFO_REQUESTED' — since that one also
+// needs to flip kycStatus; provider profile types have no such side
+// effect, so they go through this generic endpoint directly).
+export async function apiRequestClarification(subjectType, subjectId, requestMessage) {
+  return apiFetch('/review/clarifications', {
+    method: 'POST',
+    body: JSON.stringify({ subjectType, subjectId, requestMessage }),
+  });
+}
+
+export async function apiGetClarifications(subjectType, subjectId) {
+  const qs = new URLSearchParams({ subjectType, subjectId }).toString();
+  return apiFetch(`/review/clarifications?${qs}`);
+}
+
+// files: array of File objects (optional)
+export async function apiRespondToClarification(clarificationId, responseMessage, files = []) {
+  const formData = new FormData();
+  formData.append('responseMessage', responseMessage);
+  files.forEach(f => formData.append('attachments', f));
+  const res = await fetch(`${BASE}/review/clarifications/${clarificationId}/respond`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${getToken()}` },
+    credentials: 'include',
+    body: formData, // multipart — don't set Content-Type manually
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error?.message || (Array.isArray(data?.message) ? data.message[0] : data?.message) || 'Could not send your response');
+  return data;
+}
+
+export async function apiResolveClarification(clarificationId) {
+  return apiFetch(`/review/clarifications/${clarificationId}/resolve`, { method: 'PATCH' });
+}
+
+export async function apiGetClarificationAttachmentUrl(clarificationId, attachmentId) {
+  return apiFetch(`/review/clarifications/${clarificationId}/attachments/${attachmentId}/signed-url`);
+}
+
+// ─── PROVIDER LISTING CLARIFICATION (Round 2 Milestone 6) ──────────────────
+// Convenience for a provider operator's own listing thread — mirrors
+// apiGetMyKycClarifications above. subjectType is one of
+// 'WAREHOUSE_PROFILE' | 'TESTING_AGENCY_PROFILE' | 'TRANSPORT_PROFILE'.
+export async function apiGetMyProviderClarifications(subjectType) {
+  return apiFetch(`/review/clarifications/my/provider/${subjectType}`);
 }
 
 export async function apiAdminSetUserActive(userId, isActive) {
@@ -500,6 +629,17 @@ export async function apiAdminSetUserActive(userId, isActive) {
 export async function apiAdminGetProducts(params = {}) {
   const qs = new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v))).toString();
   return apiFetch(`/products/admin/all${qs ? `?${qs}` : ''}`);
+}
+
+export async function apiAdminApproveProduct(productId) {
+  return apiFetch(`/products/admin/${productId}/approve`, { method: 'PATCH' });
+}
+
+export async function apiAdminRejectProduct(productId, reason) {
+  return apiFetch(`/products/admin/${productId}/reject`, {
+    method: 'PATCH',
+    body: JSON.stringify({ reason }),
+  });
 }
 
 export async function apiAdminRemoveProduct(productId, reason) {
@@ -647,12 +787,23 @@ export async function apiAdminSetTestingAgencyActive(id, isActive) {
   return apiFetch(`/testing/admin/${id}/active`, { method: 'PATCH', body: JSON.stringify({ isActive }) });
 }
 
+// Round 2, Milestone 6 — mirrors apiAdminVerifyWarehouse below (which
+// previously had no equivalent for testing agencies/transport providers).
+export async function apiAdminVerifyTestingAgency(id, verified) {
+  return apiFetch(`/testing/admin/${id}/verify`, { method: 'PATCH', body: JSON.stringify({ verified }) });
+}
+
 export async function apiAdminGetAllAgencies() {
   return apiFetch('/testing/admin/all');
 }
 
 export async function apiAdminSetTransportActive(id, isActive) {
   return apiFetch(`/transport/admin/${id}/active`, { method: 'PATCH', body: JSON.stringify({ isActive }) });
+}
+
+// Round 2, Milestone 6.
+export async function apiAdminVerifyTransport(id, verified) {
+  return apiFetch(`/transport/admin/${id}/verify`, { method: 'PATCH', body: JSON.stringify({ verified }) });
 }
 
 export async function apiAdminGetAllTransporters() {

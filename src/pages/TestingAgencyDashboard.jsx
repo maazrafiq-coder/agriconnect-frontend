@@ -2,9 +2,11 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   apiGetMyAgency, apiRegisterAgency, apiUpdateTestingStatus, apiSubmitTestingReport,
+  apiGetMyProviderClarifications, apiRespondToClarification,
 } from '../lib/api';
 import { Card, Btn, Badge, Tabs, Modal } from '../components/ui';
 import MediaManagerModal from '../components/MediaManager';
+import ClarificationThread from '../components/ClarificationThread';
 import T from '../theme';
 
 const inputStyle = {
@@ -182,6 +184,18 @@ export default function TestingAgencyDashboard() {
   const [mediaOpen, setMediaOpen] = useState(false);
   const [reportRequest, setReportRequest] = useState(null);
   const [busyId, setBusyId] = useState(null);
+  const [clarifications, setClarifications] = useState([]);
+
+  const loadClarifications = () => {
+    apiGetMyProviderClarifications('TESTING_AGENCY_PROFILE')
+      .then(d => setClarifications(Array.isArray(d) ? d : []))
+      .catch(() => {});
+  };
+
+  const handleRespondToClarification = async (id, message, files) => {
+    await apiRespondToClarification(id, message, files);
+    loadClarifications();
+  };
 
   const load = () => {
     setLoading(true);
@@ -192,6 +206,7 @@ export default function TestingAgencyDashboard() {
   };
 
   useEffect(load, []);
+  useEffect(loadClarifications, []);
 
   const advanceStatus = async (req) => {
     const idx = STATUS_FLOW.indexOf(req.status);
@@ -284,6 +299,19 @@ export default function TestingAgencyDashboard() {
               );
             })}
           </div>
+        )}
+
+        {clarifications.length > 0 && (
+          <>
+            <h3 style={{ fontSize: 14, fontWeight: 800, color: T.green, margin: '24px 0 12px' }}>
+              🔍 Listing Review {clarifications.filter(c => c.status === 'OPEN').length > 0 && `(${clarifications.filter(c => c.status === 'OPEN').length})`}
+            </h3>
+            <ClarificationThread
+              clarifications={clarifications}
+              viewerRole="subject"
+              onRespond={handleRespondToClarification}
+            />
+          </>
         )}
       </div>
 

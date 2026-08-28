@@ -27,8 +27,10 @@ export const BADGE_TYPE = { 'Premium':'gold', 'Export Grade':'blue', 'Verified':
 
 export const STATUS_COLORS = {
   pending:    { bg:'#FEF3C7', c:'#B45309',  l:'Pending'    },
+  requested:  { bg:'#FEF3C7', c:'#B45309',  l:'Requested'  },
   accepted:   { bg:'#DCFCE7', c:'#15803D',  l:'Accepted'   },
   confirmed:  { bg:'#DBEAFE', c:'#1D4ED8',  l:'Confirmed'  },
+  active:     { bg:'#DBEAFE', c:'#1D4ED8',  l:'Active'     },
   in_transit: { bg:'#E0E7FF', c:'#4338CA',  l:'In Transit' },
   delivered:  { bg:'#DCFCE7', c:'#15803D',  l:'Delivered'  },
   completed:  { bg:'#DCFCE7', c:'#15803D',  l:'Completed'  },

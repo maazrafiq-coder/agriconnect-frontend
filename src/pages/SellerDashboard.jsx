@@ -2,11 +2,20 @@ import { useState, useEffect } from 'react';
 import { apiGetReceivedOffers, apiGetOrders, apiAcceptOffer, apiRejectOffer, apiCounterOffer, apiGetMyProducts, apiCreateProduct, apiChangeProductStatus, apiGetCategories, apiGetCities, apiGetUnits } from '../lib/api';
 import { adaptOffers, adaptOrders, adaptProducts } from '../lib/adapters';
 import { useNavigate } from 'react-router-dom';
-import { PRODUCTS } from '../data';
-import { Card, Btn, Badge, Tabs, Modal } from '../components/ui';
+import { Card, Btn, Badge, Tabs, Modal, LoadingState, ErrorState, EmptyState, isDemoMode } from '../components/ui';
 import MediaManagerModal from '../components/MediaManager';
 import { STATUS_COLORS as SC } from '../data';
 import T from '../theme';
+
+const LISTING_STATUS = {
+  ACTIVE:          { label: 'Active',            type: 'green' },
+  PENDING_REVIEW:  { label: 'Pending Review',     type: 'gold'  },
+  REJECTED:        { label: 'Rejected',           type: 'red'   },
+  PAUSED:          { label: 'Paused',             type: 'gray'  },
+  UNDER_OFFER:     { label: 'Under Offer',        type: 'blue'  },
+  SOLD:            { label: 'Sold',               type: 'purple'},
+  REMOVED:         { label: 'Removed',            type: 'red'   },
+};
 
 const MOCK_OFFERS = [
   { id:1, buyer:'Karachi Exports Ltd', product:'1121 Basmati', qty:'100 bags', offered:3600, asking:3800, status:'pending', time:'2h ago' },
@@ -44,22 +53,44 @@ export default function SellerDashboard() {
   const [activeConvo, setActiveConvo] = useState(0);
   const [msgInput, setMsgInput] = useState('');
   const [chatMessages, setChatMessages] = useState(MESSAGES[0].chat);
-  const [OFFERS, setOFFERS] = useState(MOCK_OFFERS);
-  const [ORDERS, setORDERS] = useState(MOCK_ORDERS);
+  const [OFFERS, setOFFERS] = useState([]);
+  const [offersState, setOffersState] = useState('loading');
+  const [ORDERS, setORDERS] = useState([]);
+  const [ordersState, setOrdersState] = useState('loading');
   const [myListings, setMyListings] = useState([]);
+  const [listingsState, setListingsState] = useState('loading');
+
+  const loadOffers = () => {
+    setOffersState('loading');
+    apiGetReceivedOffers()
+      .then(data => { setOFFERS(adaptOffers(Array.isArray(data) ? data : [])); setOffersState('ready'); })
+      .catch(() => {
+        if (isDemoMode()) { setOFFERS(MOCK_OFFERS); setOffersState('ready'); }
+        else setOffersState('error');
+      });
+  };
+
+  const loadOrders = () => {
+    setOrdersState('loading');
+    apiGetOrders('seller')
+      .then(data => { setORDERS(adaptOrders(Array.isArray(data) ? data : [])); setOrdersState('ready'); })
+      .catch(() => {
+        if (isDemoMode()) { setORDERS(MOCK_ORDERS); setOrdersState('ready'); }
+        else setOrdersState('error');
+      });
+  };
+
+  const loadListings = () => {
+    setListingsState('loading');
+    apiGetMyProducts()
+      .then(data => { setMyListings(adaptProducts(Array.isArray(data) ? data : [])); setListingsState('ready'); })
+      .catch(() => setListingsState('error'));
+  };
 
   useEffect(() => {
-    apiGetReceivedOffers()
-      .then(data => setOFFERS(adaptOffers(Array.isArray(data) ? data : [])))
-      .catch(() => setOFFERS(MOCK_OFFERS));
-
-    apiGetOrders('seller')
-      .then(data => setORDERS(adaptOrders(Array.isArray(data) ? data : [])))
-      .catch(() => setORDERS(MOCK_ORDERS));
-
-    apiGetMyProducts()
-      .then(data => setMyListings(adaptProducts(Array.isArray(data) ? data : [])))
-      .catch(() => {});
+    loadOffers();
+    loadOrders();
+    loadListings();
   }, []);
 
 
@@ -112,7 +143,10 @@ export default function SellerDashboard() {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
             <Card>
               <h3 style={{ margin: '0 0 14px', fontSize: 13, fontWeight: 800, color: T.green }}>Recent Offers</h3>
-              {OFFERS.map(o => (
+              {offersState === 'loading' && <LoadingState label="Loading offers…" />}
+              {offersState === 'error' && <ErrorState message="Could not load offers." onRetry={loadOffers} />}
+              {offersState === 'ready' && OFFERS.length === 0 && <EmptyState icon="💬" title="No offers yet" />}
+              {offersState === 'ready' && OFFERS.slice(0, 5).map(o => (
                 <div key={o.id} style={{ padding: '10px 0', borderBottom: `1px solid ${T.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
                     <div style={{ fontWeight: 700, fontSize: 12 }}>{o.buyer}</div>
@@ -126,7 +160,10 @@ export default function SellerDashboard() {
             </Card>
             <Card>
               <h3 style={{ margin: '0 0 14px', fontSize: 13, fontWeight: 800, color: T.green }}>Recent Orders</h3>
-              {ORDERS.map(o => (
+              {ordersState === 'loading' && <LoadingState label="Loading orders…" />}
+              {ordersState === 'error' && <ErrorState message="Could not load orders." onRetry={loadOrders} />}
+              {ordersState === 'ready' && ORDERS.length === 0 && <EmptyState icon="📋" title="No orders yet" />}
+              {ordersState === 'ready' && ORDERS.slice(0, 5).map(o => (
                 <div key={o.id} style={{ padding: '10px 0', borderBottom: `1px solid ${T.border}` }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div>
@@ -146,28 +183,46 @@ export default function SellerDashboard() {
 
       {/* LISTINGS */}
       {tab === 'listings' && (
+        <div>
+          {listingsState === 'loading' && <LoadingState label="Loading your listings…" />}
+          {listingsState === 'error' && <ErrorState message="Could not load your listings." onRetry={loadListings} />}
+          {listingsState === 'ready' && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(250px,1fr))', gap: 14 }}>
           {myListings.map(p => (
             <Card key={p.id} style={{ padding: 0, overflow: 'hidden' }}>
               <div style={{ height: 90, background: p.images?.[0] ? `url(${p.images[0]}) center/cover no-repeat` : 'linear-gradient(135deg,#74C69D22,#B7A05A22)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 36, position: 'relative' }}>
                 {!p.images?.[0] && '🌾'}
-                <div style={{ position: 'absolute', top: 8, right: 8 }}><Badge label="Active" type="green" /></div>
+                <div style={{ position: 'absolute', top: 8, right: 8 }}>
+                  <Badge label={(LISTING_STATUS[p.status] || LISTING_STATUS.ACTIVE).label} type={(LISTING_STATUS[p.status] || LISTING_STATUS.ACTIVE).type} />
+                </div>
               </div>
               <div style={{ padding: '12px 14px' }}>
                 <div style={{ fontWeight: 700, fontSize: 13, color: T.green, marginBottom: 3 }}>{p.name}</div>
                 <div style={{ fontSize: 11, color: T.muted, marginBottom: 8 }}>{p.qty} {p.unit} · ₨{p.price.toLocaleString()}/bag</div>
+                {p.status === 'REJECTED' && p.rejectionNote && (
+                  <div style={{ fontSize: 11, color: T.danger, background: '#FEE2E2', padding: '6px 8px', borderRadius: 6, marginBottom: 8 }}>
+                    {p.rejectionNote} — edit and save to resubmit for review.
+                  </div>
+                )}
+                {p.status === 'PENDING_REVIEW' && (
+                  <div style={{ fontSize: 11, color: '#B45309', marginBottom: 8 }}>
+                    Awaiting admin approval before it appears on the marketplace.
+                  </div>
+                )}
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                   <Btn variant="secondary" size="sm" onClick={() => navigate(`/product/${p.id}`)}>View</Btn>
                   <Btn variant="ghost" size="sm" onClick={() => setNewListingModal(true)}>Edit</Btn>
                   <Btn variant="ghost" size="sm" onClick={() => setMediaModalProduct(p)}>
                     📷 {p.images?.length ? `Photos (${p.images.length})` : 'Add Photos'}
                   </Btn>
-                  <Btn variant="ghost" size="sm" onClick={async () => {
-                    try {
-                      await apiChangeProductStatus(p._raw?.id || p.id, p.status === 'PAUSED' ? 'ACTIVE' : 'PAUSED');
-                      setMyListings(prev => prev.map(x => x.id === p.id ? { ...x, status: x.status === 'PAUSED' ? 'ACTIVE' : 'PAUSED' } : x));
-                    } catch (e) { /* keep UI responsive even if API unavailable in demo */ }
-                  }}>{p.status === 'PAUSED' ? 'Resume' : 'Pause'}</Btn>
+                  {(p.status === 'ACTIVE' || p.status === 'PAUSED') && (
+                    <Btn variant="ghost" size="sm" onClick={async () => {
+                      try {
+                        await apiChangeProductStatus(p._raw?.id || p.id, p.status === 'PAUSED' ? 'ACTIVE' : 'PAUSED');
+                        setMyListings(prev => prev.map(x => x.id === p.id ? { ...x, status: x.status === 'PAUSED' ? 'ACTIVE' : 'PAUSED' } : x));
+                      } catch (e) { alert(e.message || 'Could not update listing status'); }
+                    }}>{p.status === 'PAUSED' ? 'Resume' : 'Pause'}</Btn>
+                  )}
                 </div>
               </div>
             </Card>
@@ -182,14 +237,18 @@ export default function SellerDashboard() {
             </div>
           </Card>
         </div>
+          )}
+        </div>
       )}
 
       {/* OFFERS */}
       {tab === 'offers' && (
         <Card>
           <h3 style={{ margin: '0 0 16px', fontSize: 13, fontWeight: 800, color: T.green }}>All Offers Received</h3>
-          {OFFERS.length === 0 && <p style={{ fontSize: 13, color: T.muted, textAlign: 'center', padding: '20px 0' }}>No offers yet.</p>}
-          {OFFERS.map(o => (
+          {offersState === 'loading' && <LoadingState label="Loading offers…" />}
+          {offersState === 'error' && <ErrorState message="Could not load offers." onRetry={loadOffers} />}
+          {offersState === 'ready' && OFFERS.length === 0 && <p style={{ fontSize: 13, color: T.muted, textAlign: 'center', padding: '20px 0' }}>No offers yet.</p>}
+          {offersState === 'ready' && OFFERS.map(o => (
             <div key={o.id} style={{ padding: '14px 0', borderBottom: `1px solid ${T.border}` }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 10 }}>
                 <div>
@@ -234,7 +293,10 @@ export default function SellerDashboard() {
       {tab === 'orders' && (
         <Card>
           <h3 style={{ margin: '0 0 16px', fontSize: 13, fontWeight: 800, color: T.green }}>All Orders</h3>
-          {ORDERS.map(o => (
+          {ordersState === 'loading' && <LoadingState label="Loading orders…" />}
+          {ordersState === 'error' && <ErrorState message="Could not load orders." onRetry={loadOrders} />}
+          {ordersState === 'ready' && ORDERS.length === 0 && <EmptyState icon="📋" title="No orders yet" />}
+          {ordersState === 'ready' && ORDERS.map(o => (
             <div key={o.id} style={{ padding: '14px 0', borderBottom: `1px solid ${T.border}` }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
                 <div>

@@ -146,3 +146,56 @@ export const SectionTitle = ({ title, subtitle }) => (
     {subtitle && <p style={{ margin: '5px 0 0', color: T.muted, fontSize: 13 }}>{subtitle}</p>}
   </div>
 );
+
+// ─── DEMO MODE ──────────────────────────────────────────────────────────────
+// Sample/demo data must never be a silent substitute for a failed API call
+// (P0 #10). It may only ever appear when explicitly opted into via this env
+// var — never as an automatic fallback on error.
+export const isDemoMode = () => String(import.meta.env.VITE_DEMO_MODE).toLowerCase() === 'true';
+
+// ─── API STATE ──────────────────────────────────────────────────────────────
+// Standard loading / error(+retry) / empty states for any screen that loads
+// data from the API. Replaces the old pattern of silently falling back to
+// hardcoded sample data when a request failed, which made real outages and
+// bugs invisible to both users and testers.
+export const LoadingState = ({ label = 'Loading…' }) => (
+  <div style={{ textAlign: 'center', padding: '48px 20px', color: T.muted }}>
+    <div style={{ fontSize: 28, marginBottom: 10 }}>⏳</div>
+    <div style={{ fontSize: 13, fontWeight: 600 }}>{label}</div>
+  </div>
+);
+
+export const ErrorState = ({ message, onRetry }) => (
+  <div style={{
+    textAlign: 'center', padding: '40px 20px',
+    background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 12,
+  }}>
+    <div style={{ fontSize: 28, marginBottom: 10 }}>⚠️</div>
+    <div style={{ fontSize: 13, fontWeight: 700, color: '#B91C1C', marginBottom: 4 }}>
+      Couldn't load this data
+    </div>
+    <div style={{ fontSize: 12, color: '#991B1B', marginBottom: onRetry ? 16 : 0 }}>
+      {message || 'Something went wrong talking to the server. Please try again.'}
+    </div>
+    {onRetry && (
+      <button
+        onClick={onRetry}
+        style={{
+          background: '#B91C1C', color: '#fff', border: 'none',
+          borderRadius: 8, padding: '8px 18px', fontSize: 12, fontWeight: 700,
+          cursor: 'pointer', fontFamily: 'inherit',
+        }}
+      >
+        Retry
+      </button>
+    )}
+  </div>
+);
+
+export const EmptyState = ({ icon = '📭', title = 'Nothing here yet', subtitle }) => (
+  <div style={{ textAlign: 'center', padding: '48px 20px', color: T.muted }}>
+    <div style={{ fontSize: 32, marginBottom: 10 }}>{icon}</div>
+    <div style={{ fontSize: 14, fontWeight: 700, color: T.text, marginBottom: subtitle ? 4 : 0 }}>{title}</div>
+    {subtitle && <div style={{ fontSize: 12 }}>{subtitle}</div>}
+  </div>
+);

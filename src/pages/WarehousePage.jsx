@@ -1,8 +1,31 @@
 import { useState, useMemo } from "react";
 import T from "../theme";
 import { useEffect } from "react";
-import { apiGetWarehouses, apiBookStorage, apiGetMyReceipts, apiApplyLien, apiBuyInsurance } from "../lib/api";
-import { adaptWarehouses, adaptReceipts, toBookingRequest } from "../lib/adapters";
+import { apiGetWarehouses, apiBookStorage, apiGetMyReceipts, apiApplyLien, apiBuyInsurance, apiGetMyBookings, apiCancelBooking } from "../lib/api";
+import { adaptWarehouses, adaptReceipts, adaptBookings, toBookingRequest } from "../lib/adapters";
+import { STATUS_COLORS } from "../data";
+import { isDemoMode } from "../components/ui";
+import { useAuth } from "../context/AuthContext";
+
+// Demo/sample data is only ever shown when explicitly enabled — never as a
+// silent substitute for a failed API call. See P0 #10 (misleading mock
+// fallbacks) in the fix backlog.
+
+// Inline error banner used inside action modals (booking, lien, insurance)
+// so a failed request is always visible to the user instead of silently
+// proceeding to a fake success screen.
+const ErrorBanner = ({ message, onLogin }) => {
+  if (!message) return null;
+  const isAuthError = /unauthor/i.test(message) || /log ?in/i.test(message);
+  return (
+    <div style={{background:'#FEF2F2',border:'1px solid #FECACA',borderRadius:8,padding:'10px 12px',marginBottom:14,fontSize:12,color:'#B91C1C',display:'flex',alignItems:'center',justifyContent:'space-between',gap:10}}>
+      <span>⚠ {isAuthError ? 'Please log in to continue — your session has expired or you are not signed in.' : message}</span>
+      {isAuthError && onLogin && (
+        <button onClick={onLogin} style={{background:'#B91C1C',color:'#fff',border:'none',borderRadius:6,padding:'5px 10px',fontSize:11,fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>Log In</button>
+      )}
+    </div>
+  );
+};
 
 // Colors from theme.js + extras
 const amber = '#B45309';
@@ -198,10 +221,13 @@ const ReceiptDetailModal = ({ receipt:r, onClose, onPlaceLien, onBuyInsurance })
 
 // ─── BANK LIEN MODAL ──────────────────────────────────────────────────────────
 const BankLienModal = ({ receipt, onClose, onSubmit }) => {
+  const { openLogin } = useAuth();
   const [bank, setBank] = useState('');
   const [amount, setAmount] = useState('');
   const [purpose, setPurpose] = useState('working_capital');
   const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
   const maxLoan = Math.round(receipt.currentValue * 0.7);
 
   if (submitted) return (
@@ -264,7 +290,10 @@ const BankLienModal = ({ receipt, onClose, onSubmit }) => {
         ))}
       </div>
 
-      <Btn variant="amber" style={{width:'100%',padding:'11px'}} disabled={!bank||!amount||Number(amount)>maxLoan} onClick={async ()=>{
+      <ErrorBanner message={error} onLogin={openLogin}/>
+      <Btn variant="amber" style={{width:'100%',padding:'11px'}} disabled={!bank||!amount||Number(amount)>maxLoan||submitting} onClick={async ()=>{
+        setError(null);
+        setSubmitting(true);
         try {
           await apiApplyLien({
             receiptId: receipt._raw?.id || receipt.id,
@@ -274,10 +303,14 @@ const BankLienModal = ({ receipt, onClose, onSubmit }) => {
             interestRate: 8,
             tenureMonths: 6,
           });
-        } catch (e) { /* show success UI anyway in demo mode */ }
-        setSubmitted(true);
+          setSubmitted(true);
+        } catch (e) {
+          setError(e?.message || 'Failed to submit loan application. Please try again.');
+        } finally {
+          setSubmitting(false);
+        }
       }}>
-        Submit Loan Application →
+        {submitting ? 'Submitting…' : 'Submit Loan Application →'}
       </Btn>
     </Modal>
   );
@@ -285,9 +318,12 @@ const BankLienModal = ({ receipt, onClose, onSubmit }) => {
 
 // ─── INSURANCE MODAL ──────────────────────────────────────────────────────────
 const InsuranceModal = ({ receipt, onClose }) => {
+  const { openLogin } = useAuth();
   const [selected, setSelected] = useState(null);
   const [declaredValue, setDeclaredValue] = useState(String(receipt.currentValue));
   const [booked, setBooked] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
 
   if (booked && selected) {
     const premium = Math.round(Number(declaredValue) * parseFloat(selected.premium) / 100);
@@ -345,7 +381,10 @@ const InsuranceModal = ({ receipt, onClose }) => {
           </div>
         );
       })}
-      <Btn variant="teal" style={{width:'100%',padding:'11px',marginTop:8}} disabled={!selected||!declaredValue} onClick={async ()=>{
+      <ErrorBanner message={error} onLogin={openLogin}/>
+      <Btn variant="teal" style={{width:'100%',padding:'11px',marginTop:8}} disabled={!selected||!declaredValue||submitting} onClick={async ()=>{
+        setError(null);
+        setSubmitting(true);
         try {
           await apiBuyInsurance({
             receiptId: receipt._raw?.id || receipt.id,
@@ -355,35 +394,90 @@ const InsuranceModal = ({ receipt, onClose }) => {
             premiumAmount: Math.round(Number(declaredValue) * parseFloat(selected.premium) / 100),
             coverage: selected.coverage,
           });
-        } catch (e) { /* show success UI anyway in demo mode */ }
-        setBooked(true);
+          setBooked(true);
+        } catch (e) {
+          setError(e?.message || 'Failed to activate policy. Please try again.');
+        } finally {
+          setSubmitting(false);
+        }
       }}>
-        Activate Policy →
+        {submitting ? 'Activating…' : 'Activate Policy →'}
       </Btn>
+    </Modal>
+  );
+};
+
+// ─── CANCEL BOOKING MODAL ───────────────────────────────────────────────────
+const CancelBookingModal = ({ booking, onClose, onCancelled }) => {
+  const [reason, setReason] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+
+  const submit = async () => {
+    setError(null);
+    setSubmitting(true);
+    try {
+      await apiCancelBooking(booking.id, reason || undefined);
+      onCancelled();
+    } catch (e) {
+      setError(e?.message || 'Failed to cancel this booking. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Modal title={`Cancel Booking — ${booking.reference}`} onClose={onClose}>
+      <p style={{fontSize:13,color:T.muted,margin:'0 0 14px',lineHeight:1.6}}>
+        This will cancel your booking request at <strong>{booking.warehouseName}</strong>. This can't be undone.
+      </p>
+      <div style={{marginBottom:14}}>
+        <label style={{fontSize:11,fontWeight:700,color:T.muted,marginBottom:5,display:'block'}}>REASON (OPTIONAL)</label>
+        <textarea
+          value={reason}
+          onChange={e=>setReason(e.target.value)}
+          placeholder="Let the warehouse know why, if you'd like…"
+          style={{width:'100%',minHeight:60,padding:'9px 12px',border:`1.5px solid ${T.border}`,borderRadius:7,fontSize:13,fontFamily:'inherit',outline:'none',boxSizing:'border-box',resize:'vertical'}}
+        />
+      </div>
+      {error && <div style={{background:'#FEF2F2',border:'1px solid #FECACA',borderRadius:8,padding:'10px 12px',marginBottom:14,fontSize:12,color:'#B91C1C'}}>⚠ {error}</div>}
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+        <Btn variant="ghost" onClick={onClose} disabled={submitting}>Keep Booking</Btn>
+        <Btn variant="danger" onClick={submit} disabled={submitting}>{submitting ? 'Cancelling…' : 'Cancel Booking'}</Btn>
+      </div>
     </Modal>
   );
 };
 
 // ─── BOOKING MODAL ────────────────────────────────────────────────────────────
 const BookingModal = ({ warehouse:w, onClose }) => {
+  const { openLogin } = useAuth();
   const [step, setStep] = useState(1);
   const [form, setForm] = useState({ commodity:'', variety:'', qty:'', duration:'', entryDate:'', packagingType:'bags', insurance:false });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+  const [bookingReference, setBookingReference] = useState(null);
   const set = (k,v) => setForm(f=>({...f,[k]:v}));
   const totalCost = form.qty && form.duration ? Math.round(Number(form.qty)*w.pricePerTon*Number(form.duration)/30) : 0;
 
   if (step===3) return (
-    <Modal title="Storage Booked!" onClose={onClose}>
+    <Modal title="Booking Request Sent" onClose={onClose}>
       <div style={{textAlign:'center',padding:'20px 0'}}>
-        <div style={{fontSize:56,marginBottom:14}}>🏪</div>
-        <h3 style={{color:T.green,margin:'0 0 10px'}}>Booking Confirmed</h3>
-        <p style={{color:T.muted,fontSize:13,margin:'0 0 20px',lineHeight:1.6}}>Your storage at <strong>{w.name}</strong> is confirmed. A Digital Warehouse Receipt will be issued once your commodity arrives and is weighed.</p>
+        <div style={{fontSize:56,marginBottom:14}}>📨</div>
+        <h3 style={{color:T.green,margin:'0 0 6px'}}>Request Sent to Warehouse</h3>
+        {bookingReference && (
+          <div style={{display:'inline-block',background:T.surface,border:`1px solid ${T.border}`,borderRadius:20,padding:'4px 14px',fontSize:12,fontWeight:800,color:T.green,marginBottom:10,letterSpacing:0.3}}>
+            {bookingReference}
+          </div>
+        )}
+        <p style={{color:T.muted,fontSize:13,margin:'0 0 20px',lineHeight:1.6}}><strong>{w.name}</strong> needs to accept your request before it's confirmed. You can track its status any time under "My Bookings".</p>
         <div style={{background:T.surface,borderRadius:10,padding:14,marginBottom:20,textAlign:'left'}}>
           <InfoRow label="Warehouse" value={w.name}/>
           <InfoRow label="Commodity" value={`${form.commodity} (${form.variety})`}/>
           <InfoRow label="Quantity" value={`${form.qty} tons`}/>
           <InfoRow label="Duration" value={`${form.duration} days`}/>
           <InfoRow label="Total Cost" value={`₨${totalCost.toLocaleString()}`} accent={T.gold}/>
-          <InfoRow label="DWR Issuance" value="On arrival + weighing"/>
+          <InfoRow label="Status" value="Requested — awaiting warehouse response"/>
         </div>
         <Btn variant="primary" onClick={onClose}>Done</Btn>
       </div>
@@ -477,14 +571,22 @@ const BookingModal = ({ warehouse:w, onClose }) => {
             🏦 <strong>Tip:</strong> After storing, you can use your Digital Warehouse Receipt as collateral to get a bank loan of up to 70% of the commodity value.
           </div>
 
+          <ErrorBanner message={error} onLogin={openLogin}/>
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
-            <Btn variant="ghost" onClick={()=>setStep(1)}>← Back</Btn>
-            <Btn variant="primary" onClick={async ()=>{
+            <Btn variant="ghost" onClick={()=>setStep(1)} disabled={submitting}>← Back</Btn>
+            <Btn variant="primary" disabled={submitting} onClick={async ()=>{
+              setError(null);
+              setSubmitting(true);
               try {
-                await apiBookStorage(toBookingRequest({ warehouseId: w._raw?.id || w.id, commodity: form.commodity, variety: form.variety, qty: form.qty, packagingType: form.packagingType, entryDate: form.entryDate, duration: form.duration, insurance: form.insurance }));
-              } catch (e) { /* show success UI anyway in demo mode */ }
-              setStep(3);
-            }}>Confirm Booking →</Btn>
+                const res = await apiBookStorage(toBookingRequest({ warehouseId: w._raw?.id || w.id, commodity: form.commodity, variety: form.variety, qty: form.qty, packagingType: form.packagingType, entryDate: form.entryDate, duration: form.duration, insurance: form.insurance }));
+                setBookingReference(res?.booking?.bookingReference || null);
+                setStep(3);
+              } catch (e) {
+                setError(e?.message || 'Failed to confirm booking. Please try again.');
+              } finally {
+                setSubmitting(false);
+              }
+            }}>{submitting ? 'Sending Request…' : 'Send Booking Request →'}</Btn>
           </div>
         </>
       )}
@@ -586,27 +688,66 @@ const WarehouseDetailModal = ({ w, onClose, onBook }) => (
 
 // ─── MAIN MODULE ──────────────────────────────────────────────────────────────
 export default function WarehouseModule() {
+  const { user, openLogin } = useAuth();
   const [tab, setTab] = useState('browse');
-  const [WAREHOUSES, setWAREHOUSES] = useState(MOCK_WAREHOUSES);
-  const [MY_RECEIPTS, setMY_RECEIPTS] = useState(MOCK_RECEIPTS);
-  const [loadingWarehouses, setLoadingWarehouses] = useState(true);
+  const [WAREHOUSES, setWAREHOUSES] = useState([]);
+  const [warehousesState, setWarehousesState] = useState('loading'); // loading | ready | error
+  const [MY_RECEIPTS, setMY_RECEIPTS] = useState([]);
+  const [receiptsState, setReceiptsState] = useState('loading'); // loading | ready | error | guest
+  const [MY_BOOKINGS, setMY_BOOKINGS] = useState([]);
+  const [bookingsState, setBookingsState] = useState('loading'); // loading | ready | error | guest
 
-  useEffect(() => {
+  const loadWarehouses = () => {
+    setWarehousesState('loading');
     apiGetWarehouses()
-      .then(data => setWAREHOUSES(adaptWarehouses(Array.isArray(data) ? data : [])))
-      .catch(() => setWAREHOUSES(MOCK_WAREHOUSES))
-      .finally(() => setLoadingWarehouses(false));
+      .then(data => { setWAREHOUSES(adaptWarehouses(Array.isArray(data) ? data : [])); setWarehousesState('ready'); })
+      .catch(() => {
+        if (isDemoMode()) { setWAREHOUSES(MOCK_WAREHOUSES); setWarehousesState('ready'); }
+        else setWarehousesState('error');
+      });
+  };
 
+  const loadReceipts = () => {
+    if (!user) { setReceiptsState('guest'); setMY_RECEIPTS([]); return; }
+    setReceiptsState('loading');
     apiGetMyReceipts()
-      .then(data => setMY_RECEIPTS(adaptReceipts(Array.isArray(data) ? data : [])))
-      .catch(() => setMY_RECEIPTS(MOCK_RECEIPTS));
-  }, []);
+      .then(data => { setMY_RECEIPTS(adaptReceipts(Array.isArray(data) ? data : [])); setReceiptsState('ready'); })
+      .catch(() => {
+        if (isDemoMode()) { setMY_RECEIPTS(MOCK_RECEIPTS); setReceiptsState('ready'); }
+        else setReceiptsState('error');
+      });
+  };
+
+  const loadBookings = () => {
+    if (!user) { setBookingsState('guest'); setMY_BOOKINGS([]); return; }
+    setBookingsState('loading');
+    apiGetMyBookings()
+      .then(data => { setMY_BOOKINGS(adaptBookings(Array.isArray(data) ? data : [])); setBookingsState('ready'); })
+      .catch(() => setBookingsState('error'));
+  };
+
+  useEffect(() => { loadWarehouses(); loadReceipts(); loadBookings(); }, [user]);
   const [filter, setFilter] = useState({ type:'All', province:'All', commodity:'All', search:'' });
   const [bookingWarehouse, setBookingWarehouse] = useState(null);
   const [viewWarehouse, setViewWarehouse] = useState(null);
   const [viewReceipt, setViewReceipt] = useState(null);
   const [lienReceipt, setLienReceipt] = useState(null);
   const [insureReceipt, setInsureReceipt] = useState(null);
+  const [cancelBookingTarget, setCancelBookingTarget] = useState(null);
+
+  // Guests must not be able to reach the booking / lien / insurance forms at
+  // all — trying to submit and only then discovering the request 401'd is a
+  // worse experience than being asked to log in up front. The backend
+  // (JwtAuthGuard on POST /warehouse/book, /lien/apply, /insurance/buy)
+  // remains the real enforcement point; this is just so guests aren't led
+  // through a form only to hit an auth wall at the very end.
+  const requireAuth = (fn) => (...args) => {
+    if (!user) { openLogin(); return; }
+    fn(...args);
+  };
+  const handleBook = requireAuth(setBookingWarehouse);
+  const handlePlaceLien = requireAuth(setLienReceipt);
+  const handleBuyInsurance = requireAuth(setInsureReceipt);
 
   const filtered = useMemo(() => {
     let r = [...WAREHOUSES];
@@ -657,7 +798,7 @@ export default function WarehouseModule() {
       {/* MAIN CONTENT */}
       <div style={{maxWidth:1100,margin:'0 auto',padding:'28px 20px'}}>
         <TabBar
-          tabs={[['browse','🏪 Browse Warehouses'],['receipts','📄 My Receipts ('+MY_RECEIPTS.length+')'],['howItWorks','💡 How It Works']]}
+          tabs={[['browse','🏪 Browse Warehouses'],['bookings','📋 My Bookings ('+MY_BOOKINGS.length+')'],['receipts','📄 My Receipts ('+MY_RECEIPTS.length+')'],['howItWorks','💡 How It Works']]}
           active={tab} onChange={setTab}
         />
 
@@ -687,15 +828,109 @@ export default function WarehouseModule() {
               </div>
             </Card>
 
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
-              <span style={{fontSize:13,color:T.muted}}><strong style={{color:T.text}}>{filtered.length}</strong> warehouses found</span>
-            </div>
+            {warehousesState==='ready' && (
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
+                <span style={{fontSize:13,color:T.muted}}><strong style={{color:T.text}}>{filtered.length}</strong> warehouses found</span>
+              </div>
+            )}
 
-            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(320px,1fr))',gap:16}}>
-              {filtered.map(w=>(
-                <WarehouseCard key={w.id} w={w} onBook={setBookingWarehouse} onView={setViewWarehouse}/>
-              ))}
-            </div>
+            {warehousesState==='loading' && (
+              <div style={{textAlign:'center',padding:'48px 20px',color:T.muted}}>
+                <div style={{fontSize:28,marginBottom:10}}>⏳</div>
+                <div style={{fontSize:13,fontWeight:600}}>Loading warehouses…</div>
+              </div>
+            )}
+            {warehousesState==='error' && (
+              <div style={{textAlign:'center',padding:'40px 20px',background:'#FEF2F2',border:'1px solid #FECACA',borderRadius:12}}>
+                <div style={{fontSize:28,marginBottom:10}}>⚠️</div>
+                <div style={{fontSize:13,fontWeight:700,color:'#B91C1C',marginBottom:4}}>Couldn't load warehouses</div>
+                <div style={{fontSize:12,color:'#991B1B',marginBottom:16}}>Something went wrong talking to the server. Please try again.</div>
+                <button onClick={loadWarehouses} style={{background:'#B91C1C',color:'#fff',border:'none',borderRadius:8,padding:'8px 18px',fontSize:12,fontWeight:700,cursor:'pointer',fontFamily:'inherit'}}>Retry</button>
+              </div>
+            )}
+            {warehousesState==='ready' && filtered.length===0 && (
+              <div style={{textAlign:'center',padding:'48px 20px',color:T.muted}}>
+                <div style={{fontSize:32,marginBottom:10}}>🏪</div>
+                <div style={{fontSize:14,fontWeight:700,color:T.text}}>No warehouses match these filters</div>
+              </div>
+            )}
+            {warehousesState==='ready' && filtered.length>0 && (
+              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(320px,1fr))',gap:16}}>
+                {filtered.map(w=>(
+                  <WarehouseCard key={w.id} w={w} onBook={handleBook} onView={setViewWarehouse}/>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* MY BOOKINGS TAB */}
+        {tab==='bookings' && (
+          <div>
+            {bookingsState==='guest' && (
+              <div style={{textAlign:'center',padding:'48px 20px',color:T.muted,background:T.white,borderRadius:12,border:`1px solid ${T.border}`}}>
+                <div style={{fontSize:32,marginBottom:10}}>🔒</div>
+                <div style={{fontSize:14,fontWeight:700,color:T.text,marginBottom:10}}>Log in to view your bookings</div>
+                <Btn variant="primary" onClick={openLogin}>Log In</Btn>
+              </div>
+            )}
+            {bookingsState==='loading' && (
+              <div style={{textAlign:'center',padding:'48px 20px',color:T.muted}}>
+                <div style={{fontSize:28,marginBottom:10}}>⏳</div>
+                <div style={{fontSize:13,fontWeight:600}}>Loading your bookings…</div>
+              </div>
+            )}
+            {bookingsState==='error' && (
+              <div style={{textAlign:'center',padding:'40px 20px',background:'#FEF2F2',border:'1px solid #FECACA',borderRadius:12}}>
+                <div style={{fontSize:28,marginBottom:10}}>⚠️</div>
+                <div style={{fontSize:13,fontWeight:700,color:'#B91C1C',marginBottom:4}}>Couldn't load your bookings</div>
+                <div style={{fontSize:12,color:'#991B1B',marginBottom:16}}>Something went wrong talking to the server. Please try again.</div>
+                <button onClick={loadBookings} style={{background:'#B91C1C',color:'#fff',border:'none',borderRadius:8,padding:'8px 18px',fontSize:12,fontWeight:700,cursor:'pointer',fontFamily:'inherit'}}>Retry</button>
+              </div>
+            )}
+            {bookingsState==='ready' && MY_BOOKINGS.length===0 && (
+              <div style={{textAlign:'center',padding:'48px 20px',color:T.muted}}>
+                <div style={{fontSize:32,marginBottom:10}}>📋</div>
+                <div style={{fontSize:14,fontWeight:700,color:T.text}}>No booking requests yet</div>
+                <div style={{fontSize:12,marginTop:4}}>Browse warehouses and send a booking request to get started.</div>
+              </div>
+            )}
+            {bookingsState==='ready' && MY_BOOKINGS.length>0 && (
+              <div style={{display:'grid',gap:10}}>
+                {MY_BOOKINGS.map(b=>{
+                  const sc = STATUS_COLORS[b.status] || { bg:'#F3F4F6', c:'#6B7280', l:b.status };
+                  const canCancel = b.status==='requested' || b.status==='accepted';
+                  return (
+                    <Card key={b.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:10}}>
+                      <div>
+                        <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:3}}>
+                          <span style={{fontSize:11,fontWeight:800,color:T.muted,letterSpacing:0.3}}>{b.reference}</span>
+                          <span style={{background:sc.bg,color:sc.c,padding:'2px 8px',borderRadius:8,fontSize:10,fontWeight:700}}>{sc.l}</span>
+                        </div>
+                        <div style={{fontSize:13,fontWeight:700,color:T.text}}>
+                          {b.commodity}{b.variety ? ` · ${b.variety}` : ''} — {b.qty} tons
+                        </div>
+                        <div style={{fontSize:11.5,color:T.muted,marginTop:2}}>
+                          {b.warehouseName} · {b.warehouseCity} · Entry {b.entryDate ? new Date(b.entryDate).toLocaleDateString('en-PK',{day:'numeric',month:'short',year:'numeric'}) : '—'}
+                        </div>
+                        {b.status==='rejected' && b.rejectionReason && (
+                          <div style={{fontSize:11.5,color:T.danger,marginTop:4}}>Reason: {b.rejectionReason}</div>
+                        )}
+                        {b.status==='cancelled' && b.cancelReason && (
+                          <div style={{fontSize:11.5,color:T.muted,marginTop:4}}>Reason: {b.cancelReason}</div>
+                        )}
+                      </div>
+                      <div style={{display:'flex',gap:8,alignItems:'center'}}>
+                        <span style={{fontSize:12,fontWeight:700,color:T.green}}>₨{b.totalCost.toLocaleString()}</span>
+                        {canCancel && (
+                          <Btn variant="ghost" size="sm" onClick={()=>setCancelBookingTarget(b)}>Cancel</Btn>
+                        )}
+                      </div>
+                    </Card>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
 
@@ -710,27 +945,60 @@ export default function WarehouseModule() {
               <Btn variant="gold" onClick={()=>setTab('browse')}>+ Book New Storage</Btn>
             </div>
 
-            {/* Receipts summary */}
-            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))',gap:12,marginBottom:24}}>
-              {[
-                ['Total Stored Value','₨'+MY_RECEIPTS.reduce((s,r)=>s+r.currentValue,0).toLocaleString(),T.green,'💰'],
-                ['Under Bank Lien','₨'+MY_RECEIPTS.filter(r=>r.lien).reduce((s,r)=>s+r.lien.amount,0).toLocaleString(),amber,'🏦'],
-                ['Insured Value','₨'+MY_RECEIPTS.filter(r=>r.insurance).reduce((s,r)=>s+r.insurance.coverage,0).toLocaleString(),T.teal,'🛡️'],
-                ['Active Receipts',MY_RECEIPTS.filter(r=>r.status!=='released').length,T.mid,'📄'],
-              ].map(([label,val,color,icon])=>(
-                <Card key={label} style={{padding:14,textAlign:'center'}}>
-                  <div style={{fontSize:22,marginBottom:4}}>{icon}</div>
-                  <div style={{fontSize:16,fontWeight:900,color}}>{val}</div>
-                  <div style={{fontSize:10,color:T.muted,fontWeight:700,letterSpacing:0.3}}>{label}</div>
-                </Card>
-              ))}
-            </div>
+            {receiptsState==='guest' && (
+              <div style={{textAlign:'center',padding:'48px 20px',color:T.muted,background:T.white,borderRadius:12,border:`1px solid ${T.border}`}}>
+                <div style={{fontSize:32,marginBottom:10}}>🔒</div>
+                <div style={{fontSize:14,fontWeight:700,color:T.text,marginBottom:10}}>Log in to view your warehouse receipts</div>
+                <Btn variant="primary" onClick={openLogin}>Log In</Btn>
+              </div>
+            )}
+            {receiptsState==='loading' && (
+              <div style={{textAlign:'center',padding:'48px 20px',color:T.muted}}>
+                <div style={{fontSize:28,marginBottom:10}}>⏳</div>
+                <div style={{fontSize:13,fontWeight:600}}>Loading your receipts…</div>
+              </div>
+            )}
+            {receiptsState==='error' && (
+              <div style={{textAlign:'center',padding:'40px 20px',background:'#FEF2F2',border:'1px solid #FECACA',borderRadius:12}}>
+                <div style={{fontSize:28,marginBottom:10}}>⚠️</div>
+                <div style={{fontSize:13,fontWeight:700,color:'#B91C1C',marginBottom:4}}>Couldn't load your receipts</div>
+                <div style={{fontSize:12,color:'#991B1B',marginBottom:16}}>Something went wrong talking to the server. Please try again.</div>
+                <button onClick={loadReceipts} style={{background:'#B91C1C',color:'#fff',border:'none',borderRadius:8,padding:'8px 18px',fontSize:12,fontWeight:700,cursor:'pointer',fontFamily:'inherit'}}>Retry</button>
+              </div>
+            )}
+            {receiptsState==='ready' && (
+              <>
+                {/* Receipts summary */}
+                <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))',gap:12,marginBottom:24}}>
+                  {[
+                    ['Total Stored Value','₨'+MY_RECEIPTS.reduce((s,r)=>s+r.currentValue,0).toLocaleString(),T.green,'💰'],
+                    ['Under Bank Lien','₨'+MY_RECEIPTS.filter(r=>r.lien).reduce((s,r)=>s+r.lien.amount,0).toLocaleString(),amber,'🏦'],
+                    ['Insured Value','₨'+MY_RECEIPTS.filter(r=>r.insurance).reduce((s,r)=>s+r.insurance.coverage,0).toLocaleString(),T.teal,'🛡️'],
+                    ['Active Receipts',MY_RECEIPTS.filter(r=>r.status!=='released').length,T.mid,'📄'],
+                  ].map(([label,val,color,icon])=>(
+                    <Card key={label} style={{padding:14,textAlign:'center'}}>
+                      <div style={{fontSize:22,marginBottom:4}}>{icon}</div>
+                      <div style={{fontSize:16,fontWeight:900,color}}>{val}</div>
+                      <div style={{fontSize:10,color:T.muted,fontWeight:700,letterSpacing:0.3}}>{label}</div>
+                    </Card>
+                  ))}
+                </div>
 
-            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(340px,1fr))',gap:14}}>
-              {MY_RECEIPTS.map(r=>(
-                <DWRCard key={r.id} receipt={r} onViewDetails={setViewReceipt}/>
-              ))}
-            </div>
+                {MY_RECEIPTS.length===0 ? (
+                  <div style={{textAlign:'center',padding:'48px 20px',color:T.muted}}>
+                    <div style={{fontSize:32,marginBottom:10}}>📄</div>
+                    <div style={{fontSize:14,fontWeight:700,color:T.text}}>No warehouse receipts yet</div>
+                    <div style={{fontSize:12,marginTop:4}}>Book storage to get your first Digital Warehouse Receipt.</div>
+                  </div>
+                ) : (
+                  <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(340px,1fr))',gap:14}}>
+                    {MY_RECEIPTS.map(r=>(
+                      <DWRCard key={r.id} receipt={r} onViewDetails={setViewReceipt}/>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
           </div>
         )}
 
@@ -815,17 +1083,24 @@ export default function WarehouseModule() {
 
       {/* MODALS */}
       {bookingWarehouse && <BookingModal warehouse={bookingWarehouse} onClose={()=>setBookingWarehouse(null)}/>}
-      {viewWarehouse && <WarehouseDetailModal w={viewWarehouse} onClose={()=>setViewWarehouse(null)} onBook={w=>{setViewWarehouse(null);setBookingWarehouse(w);}}/>}
+      {viewWarehouse && <WarehouseDetailModal w={viewWarehouse} onClose={()=>setViewWarehouse(null)} onBook={w=>{setViewWarehouse(null);handleBook(w);}}/>}
       {viewReceipt && (
         <ReceiptDetailModal
           receipt={viewReceipt}
           onClose={()=>setViewReceipt(null)}
-          onPlaceLien={r=>{setViewReceipt(null);setLienReceipt(r);}}
-          onBuyInsurance={r=>{setViewReceipt(null);setInsureReceipt(r);}}
+          onPlaceLien={r=>{setViewReceipt(null);handlePlaceLien(r);}}
+          onBuyInsurance={r=>{setViewReceipt(null);handleBuyInsurance(r);}}
         />
       )}
       {lienReceipt && <BankLienModal receipt={lienReceipt} onClose={()=>setLienReceipt(null)}/>}
       {insureReceipt && <InsuranceModal receipt={insureReceipt} onClose={()=>setInsureReceipt(null)}/>}
+      {cancelBookingTarget && (
+        <CancelBookingModal
+          booking={cancelBookingTarget}
+          onClose={()=>setCancelBookingTarget(null)}
+          onCancelled={()=>{ setCancelBookingTarget(null); loadBookings(); loadWarehouses(); }}
+        />
+      )}
     </div>
   );
 }

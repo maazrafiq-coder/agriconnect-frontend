@@ -2,9 +2,13 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   apiGetWarehouseDashboard, apiRegisterWarehouse, apiIssueReceipt,
+  apiAcceptBooking, apiRejectBooking, apiCompleteBooking,
+  apiGetMyProviderClarifications, apiRespondToClarification,
 } from '../lib/api';
-import { Card, Btn, Badge, Tabs, Modal } from '../components/ui';
+import { Card, Btn, Tabs, Modal } from '../components/ui';
+import { STATUS_COLORS } from '../data';
 import MediaManagerModal from '../components/MediaManager';
+import ClarificationThread from '../components/ClarificationThread';
 import T from '../theme';
 
 const inputStyle = {
@@ -20,9 +24,6 @@ const WAREHOUSE_TYPES = [
   ['BONDED', 'Bonded Warehouse'],
 ];
 const COMMODITIES = ['Rice', 'Wheat', 'Maize', 'Cotton', 'Sugarcane', 'Pulses'];
-const BOOKING_BADGE = {
-  pending: 'gold', confirmed: 'blue', active: 'green', completed: 'gray', cancelled: 'red',
-};
 
 // ─── REGISTER FORM (shown when no warehouse profile exists yet) ────────────
 function RegisterWarehouseForm({ onRegistered }) {
@@ -146,6 +147,48 @@ function RegisterWarehouseForm({ onRegistered }) {
   );
 }
 
+// ─── REJECT BOOKING MODAL ────────────────────────────────────────────────────
+function RejectBookingModal({ booking, onClose, onRejected }) {
+  const [reason, setReason] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    setError('');
+    if (!reason.trim()) return setError('Please provide a reason so the depositor understands why.');
+    setBusy(true);
+    try {
+      await apiRejectBooking(booking.id, reason.trim());
+      onRejected();
+    } catch (err) {
+      setError(err.message || 'Could not reject this booking.');
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal title={`Decline Booking — ${booking.bookingReference || ''}`} onClose={onClose}>
+      <p style={{ fontSize: 13, color: T.muted, margin: '0 0 14px', lineHeight: 1.6 }}>
+        Let {booking.depositor?.profile?.fullName || 'the depositor'} know why you can't accept this booking for {booking.commodity}.
+      </p>
+      <div style={{ marginBottom: 14 }}>
+        <label style={labelStyle}>REASON</label>
+        <textarea
+          style={{ ...inputStyle, minHeight: 70, resize: 'vertical' }}
+          value={reason}
+          onChange={e => setReason(e.target.value)}
+          placeholder="e.g. No capacity available for this commodity right now"
+        />
+      </div>
+      {error && <p style={{ color: T.danger, fontSize: 12, marginBottom: 12 }}>{error}</p>}
+      <div style={{ display: 'flex', gap: 10 }}>
+        <Btn variant="ghost" onClick={onClose} disabled={busy} style={{ flex: 1 }}>Cancel</Btn>
+        <Btn variant="danger" onClick={submit} disabled={busy} style={{ flex: 1 }}>{busy ? 'Declining…' : 'Decline Booking'}</Btn>
+      </div>
+    </Modal>
+  );
+}
+
 // ─── ISSUE RECEIPT MODAL ────────────────────────────────────────────────────
 function IssueReceiptModal({ booking, onClose, onIssued }) {
   const [actualQuantityTons, setQty] = useState(booking.quantityTons || '');
@@ -207,6 +250,21 @@ export default function WarehouseOperatorDashboard() {
   const [tab, setTab] = useState('overview');
   const [mediaOpen, setMediaOpen] = useState(false);
   const [receiptBooking, setReceiptBooking] = useState(null);
+  const [rejectBooking, setRejectBooking] = useState(null);
+  const [actionError, setActionError] = useState('');
+  const [actioningId, setActioningId] = useState(null);
+  const [clarifications, setClarifications] = useState([]);
+
+  const loadClarifications = () => {
+    apiGetMyProviderClarifications('WAREHOUSE_PROFILE')
+      .then(d => setClarifications(Array.isArray(d) ? d : []))
+      .catch(() => {});
+  };
+
+  const handleRespondToClarification = async (id, message, files) => {
+    await apiRespondToClarification(id, message, files);
+    loadClarifications();
+  };
 
   const load = () => {
     setLoading(true);
@@ -217,6 +275,33 @@ export default function WarehouseOperatorDashboard() {
   };
 
   useEffect(load, []);
+  useEffect(loadClarifications, []);
+
+  const handleAccept = async (booking) => {
+    setActionError('');
+    setActioningId(booking.id);
+    try {
+      await apiAcceptBooking(booking.id);
+      load();
+    } catch (err) {
+      setActionError(err.message || 'Could not accept this booking.');
+    } finally {
+      setActioningId(null);
+    }
+  };
+
+  const handleComplete = async (booking) => {
+    setActionError('');
+    setActioningId(booking.id);
+    try {
+      await apiCompleteBooking(booking.id);
+      load();
+    } catch (err) {
+      setActionError(err.message || 'Could not mark this booking complete.');
+    } finally {
+      setActioningId(null);
+    }
+  };
 
   if (loading) {
     return <div style={{ padding: 60, textAlign: 'center', color: T.muted, fontFamily: 'Inter,sans-serif' }}>Loading your warehouse dashboard…</div>;
@@ -267,7 +352,11 @@ export default function WarehouseOperatorDashboard() {
         </div>
 
         <Tabs
-          tabs={[['overview', '📋 Bookings'], ['listing', '🏭 Listing Details']]}
+          tabs={[
+            ['overview', '📋 Bookings'],
+            ['listing', '🏭 Listing Details'],
+            ['review', `🔍 Listing Review${clarifications.filter(c => c.status === 'OPEN').length ? ` (${clarifications.filter(c => c.status === 'OPEN').length})` : ''}`],
+          ]}
           active={tab} onChange={setTab}
         />
 
@@ -276,24 +365,44 @@ export default function WarehouseOperatorDashboard() {
             <Card><p style={{ fontSize: 13, color: T.muted, margin: 0 }}>No bookings yet — they'll show up here once a depositor books storage.</p></Card>
           ) : (
             <div style={{ display: 'grid', gap: 10 }}>
-              {recentBookings.map(b => (
-                <Card key={b.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: T.text }}>
-                      {b.commodity} {b.variety ? `· ${b.variety}` : ''} — {b.quantityTons} tons
+              {actionError && (
+                <div style={{ background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 8, padding: '10px 12px', fontSize: 12, color: '#B91C1C' }}>⚠ {actionError}</div>
+              )}
+              {recentBookings.map(b => {
+                const status = (b.status || 'requested').toLowerCase();
+                const sc = STATUS_COLORS[status] || { bg: '#F3F4F6', c: '#6B7280', l: b.status };
+                const busy = actioningId === b.id;
+                return (
+                  <Card key={b.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
+                        <span style={{ fontSize: 10.5, fontWeight: 800, color: T.muted, letterSpacing: 0.3 }}>{b.bookingReference}</span>
+                        <span style={{ background: sc.bg, color: sc.c, padding: '2px 8px', borderRadius: 8, fontSize: 10, fontWeight: 700 }}>{sc.l}</span>
+                      </div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: T.text }}>
+                        {b.commodity} {b.variety ? `· ${b.variety}` : ''} — {b.quantityTons} tons
+                      </div>
+                      <div style={{ fontSize: 11.5, color: T.muted, marginTop: 2 }}>
+                        {b.depositor?.profile?.fullName || 'Depositor'} · {b.depositor?.profile?.city || ''} · Entry {new Date(b.entryDate).toLocaleDateString('en-PK', { day: 'numeric', month: 'short', year: 'numeric' })}
+                      </div>
                     </div>
-                    <div style={{ fontSize: 11.5, color: T.muted, marginTop: 2 }}>
-                      {b.depositor?.profile?.fullName || 'Depositor'} · {b.depositor?.profile?.city || ''} · Entry {new Date(b.entryDate).toLocaleDateString('en-PK', { day: 'numeric', month: 'short', year: 'numeric' })}
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                      {status === 'requested' && (
+                        <>
+                          <Btn variant="primary" size="sm" disabled={busy} onClick={() => handleAccept(b)}>{busy ? 'Accepting…' : 'Accept'}</Btn>
+                          <Btn variant="ghost" size="sm" disabled={busy} onClick={() => setRejectBooking(b)}>Decline</Btn>
+                        </>
+                      )}
+                      {status === 'accepted' && (
+                        <Btn variant="secondary" size="sm" onClick={() => setReceiptBooking(b)}>Issue Receipt</Btn>
+                      )}
+                      {status === 'active' && (
+                        <Btn variant="secondary" size="sm" disabled={busy} onClick={() => handleComplete(b)}>{busy ? 'Completing…' : 'Mark Complete'}</Btn>
+                      )}
                     </div>
-                  </div>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <Badge label={(b.status || 'pending').replace(/^\w/, c => c.toUpperCase())} type={BOOKING_BADGE[b.status] || 'gray'} />
-                    {(b.status === 'confirmed' || b.status === 'active') && (
-                      <Btn variant="secondary" size="sm" onClick={() => setReceiptBooking(b)}>Issue Receipt</Btn>
-                    )}
-                  </div>
-                </Card>
-              ))}
+                  </Card>
+                );
+              })}
             </div>
           )
         )}
@@ -310,6 +419,7 @@ export default function WarehouseOperatorDashboard() {
                 ['Commodities', (warehouse.commoditiesAccepted || []).join(', ') || '—'],
                 ['Insurance Available', warehouse.insuranceAvailable ? 'Yes' : 'No'],
                 ['Status', warehouse.isActive ? 'Active — visible to buyers' : 'Delisted'],
+                ['Verification', warehouse.isVerified ? '✅ Verified by AgriConnect' : '⏳ Not yet verified'],
               ].map(([label, value]) => (
                 <div key={label}>
                   <div style={{ color: T.muted, fontSize: 10.5, fontWeight: 700, marginBottom: 3 }}>{label.toUpperCase()}</div>
@@ -318,6 +428,18 @@ export default function WarehouseOperatorDashboard() {
               ))}
             </div>
           </Card>
+        )}
+
+        {tab === 'review' && (
+          clarifications.length === 0 ? (
+            <Card><p style={{ fontSize: 13, color: T.muted, margin: 0 }}>No open questions from AgriConnect about your listing right now.</p></Card>
+          ) : (
+            <ClarificationThread
+              clarifications={clarifications}
+              viewerRole="subject"
+              onRespond={handleRespondToClarification}
+            />
+          )
         )}
       </div>
 
@@ -334,6 +456,14 @@ export default function WarehouseOperatorDashboard() {
           booking={receiptBooking}
           onClose={() => setReceiptBooking(null)}
           onIssued={() => { setReceiptBooking(null); load(); }}
+        />
+      )}
+
+      {rejectBooking && (
+        <RejectBookingModal
+          booking={rejectBooking}
+          onClose={() => setRejectBooking(null)}
+          onRejected={() => { setRejectBooking(null); load(); }}
         />
       )}
     </div>

@@ -1,39 +1,72 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { apiGetAgencies, apiBookTesting, apiGetTransporters, apiBookTransport, apiCreateTransportRequest } from '../lib/api';
-import { adaptAgencies, adaptTransporters } from '../lib/adapters';
-import { AGENCIES as MOCK_A, TRANSPORTERS as MOCK_T, PRODUCTS as MOCK_P } from '../data';
-import { Card, Btn, Stars, Modal } from '../components/ui';
+import { apiGetAgencies, apiBookTesting, apiGetTransporters, apiBookTransport, apiCreateTransportRequest, apiGetMyProducts } from '../lib/api';
+import { adaptAgencies, adaptTransporters, adaptProducts } from '../lib/adapters';
+import { AGENCIES as MOCK_A, TRANSPORTERS as MOCK_T } from '../data';
+import { Card, Btn, Stars, Modal, LoadingState, ErrorState, EmptyState, isDemoMode } from '../components/ui';
+import { useAuth } from '../context/AuthContext';
 import T from '../theme';
 
 // ─── TESTING PAGE ─────────────────────────────────────────────────────────────
 export function TestingPage() {
+  const { user, openLogin } = useAuth();
   const [agencies, setAgencies] = useState([]);
-  const [loading, setLoading]   = useState(true);
+  const [loadState, setLoadState] = useState('loading'); // loading | ready | error
   const [selected, setSelected] = useState(null);
   const [booked, setBooked]     = useState(false);
+  const [bookError, setBookError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   const [product, setProduct]   = useState('');
   const [search, setSearch]     = useState('');
+  const [myProducts, setMyProducts] = useState([]);
+  const [myProductsLoaded, setMyProductsLoaded] = useState(false);
+
+  const load = () => {
+    setLoadState('loading');
+    apiGetAgencies(search ? { search } : {})
+      .then(data => { setAgencies(adaptAgencies(Array.isArray(data) ? data : [])); setLoadState('ready'); })
+      .catch(() => {
+        if (isDemoMode()) { setAgencies(MOCK_A); setLoadState('ready'); }
+        else setLoadState('error');
+      });
+  };
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      apiGetAgencies(search ? { search } : {})
-        .then(data => setAgencies(adaptAgencies(Array.isArray(data) ? data : [])))
-        .catch(() => setAgencies(MOCK_A))
-        .finally(() => setLoading(false));
-    }, search ? 300 : 0); // small debounce while typing, instant on first load
+    const timer = setTimeout(load, search ? 300 : 0); // small debounce while typing, instant on first load
     return () => clearTimeout(timer);
   }, [search]);
 
+  // Real listings only — this used to fall back to mock PRODUCTS unconditionally,
+  // which meant a real testing booking's "Product to Test" note could end up
+  // containing a fabricated product name sent straight to a real agency.
+  useEffect(() => {
+    if (!user) return;
+    apiGetMyProducts()
+      .then(data => setMyProducts(adaptProducts(Array.isArray(data) ? data : [])))
+      .catch(() => setMyProducts([]))
+      .finally(() => setMyProductsLoaded(true));
+  }, [user]);
+
+  const openBooking = (a) => {
+    if (!user) { openLogin(); return; }
+    setSelected(a); setBooked(false); setBookError(''); setProduct('');
+  };
+
   const handleBook = async () => {
+    setBookError('');
+    setSubmitting(true);
     try {
       await apiBookTesting({
         agencyId: selected.userId || selected.id,
         servicesRequested: selected.services,
         notes: product ? `Product: ${product}` : undefined,
       });
-    } catch { /* show success anyway */ }
-    setBooked(true);
+      setBooked(true);
+    } catch (e) {
+      setBookError(e?.message || 'Failed to book testing. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -48,9 +81,10 @@ export function TestingPage() {
         </div>
       </div>
 
-      {loading ? (
-        <div style={{ textAlign: 'center', padding: 60, color: T.muted }}>Loading agencies…</div>
-      ) : (
+      {loadState === 'loading' && <LoadingState label="Loading agencies…" />}
+      {loadState === 'error' && <ErrorState message="Could not load testing agencies." onRetry={load} />}
+      {loadState === 'ready' && agencies.length === 0 && <EmptyState icon="🧪" title="No testing agencies found" />}
+      {loadState === 'ready' && agencies.length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))', gap: 18 }}>
           {agencies.map(a => (
             <Card key={a.id}>
@@ -83,14 +117,14 @@ export function TestingPage() {
                 {(a.accred || []).map(ac => <div key={ac} style={{ fontSize: 12, color: '#15803D', fontWeight: 600, marginBottom: 2 }}>✓ {ac}</div>)}
                 {a.isVerified && <div style={{ fontSize: 11, color: '#059669', fontWeight: 700, marginTop: 4 }}>✓ Platform Verified</div>}
               </div>
-              <Btn variant="teal" style={{ width: '100%' }} onClick={() => { setSelected(a); setBooked(false); }}>Book Testing →</Btn>
+              <Btn variant="teal" style={{ width: '100%' }} onClick={() => openBooking(a)}>Book Testing →</Btn>
             </Card>
           ))}
         </div>
       )}
 
       {selected && !booked && (
-        <Modal title={`Book Testing — ${selected.name}`} onClose={() => setSelected(null)}>
+        <Modal title={`Book Testing — ${selected.name}`} onClose={() => { setSelected(null); setBookError(''); }}>
           <div style={{ background: T.surface, borderRadius: 8, padding: '10px 14px', marginBottom: 14 }}>
             <div style={{ fontWeight: 700, fontSize: 13, color: T.green }}>{selected.name} · {selected.city}</div>
             <Stars rating={selected.rating} /><span style={{ fontSize: 11, color: T.muted }}> · {selected.turnaround} turnaround</span>
@@ -101,10 +135,16 @@ export function TestingPage() {
           </div>
           <div style={{ marginBottom: 14 }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: T.muted, marginBottom: 5, letterSpacing: 0.5 }}>PRODUCT TO TEST</div>
-            <select value={product} onChange={e => setProduct(e.target.value)} style={{ width: '100%', padding: '9px 12px', border: `1.5px solid ${T.border}`, borderRadius: 7, fontSize: 13, fontFamily: 'inherit', outline: 'none' }}>
-              <option value="">— Select a product —</option>
-              {MOCK_P.slice(0, 5).map(p => <option key={p.id} value={p.name}>{p.name} — {p.location?.split(',')[0]}</option>)}
-            </select>
+            {myProductsLoaded && myProducts.length === 0 ? (
+              <div style={{ fontSize: 12, color: T.muted, padding: '9px 0' }}>
+                You don't have any listed products yet — you can still book testing and add a product later.
+              </div>
+            ) : (
+              <select value={product} onChange={e => setProduct(e.target.value)} style={{ width: '100%', padding: '9px 12px', border: `1.5px solid ${T.border}`, borderRadius: 7, fontSize: 13, fontFamily: 'inherit', outline: 'none' }}>
+                <option value="">{myProductsLoaded ? '— Select a product —' : 'Loading your products…'}</option>
+                {myProducts.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
+              </select>
+            )}
           </div>
           <div style={{ marginBottom: 14 }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: T.muted, marginBottom: 5, letterSpacing: 0.5 }}>PREFERRED DATE</div>
@@ -114,7 +154,10 @@ export function TestingPage() {
             <span style={{ fontSize: 12, color: T.muted }}>Estimated fee</span>
             <span style={{ fontSize: 18, fontWeight: 800, color: T.green }}>₨{selected.price.toLocaleString()}</span>
           </div>
-          <Btn variant="teal" style={{ width: '100%', padding: '11px' }} onClick={handleBook}>Confirm & Pay →</Btn>
+          {bookError && (
+            <div style={{ background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 8, padding: '10px 12px', marginBottom: 14, fontSize: 12, color: '#B91C1C' }}>⚠ {bookError}</div>
+          )}
+          <Btn variant="teal" style={{ width: '100%', padding: '11px' }} disabled={submitting} onClick={handleBook}>{submitting ? 'Booking…' : 'Confirm & Pay →'}</Btn>
         </Modal>
       )}
       {selected && booked && (
@@ -133,25 +176,40 @@ export function TestingPage() {
 
 // ─── TRANSPORT PAGE ───────────────────────────────────────────────────────────
 export function TransportPage() {
+  const { user, openLogin } = useAuth();
   const [transporters, setTransporters] = useState([]);
-  const [loading, setLoading]           = useState(true);
+  const [loadState, setLoadState]       = useState('loading'); // loading | ready | error
   const [selected, setSelected]         = useState(null);
   const [booked, setBooked]             = useState(false);
+  const [bookError, setBookError]       = useState('');
+  const [submitting, setSubmitting]     = useState(false);
   const [from, setFrom]                 = useState('');
   const [to, setTo]                     = useState('');
   const [search, setSearch]             = useState('');
 
+  const load = () => {
+    setLoadState('loading');
+    apiGetTransporters(search ? { search } : {})
+      .then(data => { setTransporters(adaptTransporters(Array.isArray(data) ? data : [])); setLoadState('ready'); })
+      .catch(() => {
+        if (isDemoMode()) { setTransporters(MOCK_T); setLoadState('ready'); }
+        else setLoadState('error');
+      });
+  };
+
   useEffect(() => {
-    const timer = setTimeout(() => {
-      apiGetTransporters(search ? { search } : {})
-        .then(data => setTransporters(adaptTransporters(Array.isArray(data) ? data : [])))
-        .catch(() => setTransporters(MOCK_T))
-        .finally(() => setLoading(false));
-    }, search ? 300 : 0);
+    const timer = setTimeout(load, search ? 300 : 0);
     return () => clearTimeout(timer);
   }, [search]);
 
+  const openBooking = (t) => {
+    if (!user) { openLogin(); return; }
+    setSelected(t); setBooked(false); setBookError('');
+  };
+
   const handleBook = async () => {
+    setBookError('');
+    setSubmitting(true);
     try {
       const req = await apiCreateTransportRequest({
         pickupLocation: from || 'Pickup location',
@@ -159,11 +217,14 @@ export function TransportPage() {
         deliveryLocation: to || 'Delivery location',
         deliveryCity: to?.split(',')[0] || 'Karachi',
       });
-      if (req?.id) {
-        await apiBookTransport({ requestId: req.id, providerId: selected.userId || selected.id, agreedPrice: parseFloat(selected.price) || 0 });
-      }
-    } catch { /* show success */ }
-    setBooked(true);
+      if (!req?.id) throw new Error('Could not create transport request.');
+      await apiBookTransport({ requestId: req.id, providerId: selected.userId || selected.id, agreedPrice: parseFloat(selected.price) || 0 });
+      setBooked(true);
+    } catch (e) {
+      setBookError(e?.message || 'Failed to book transport. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const inputStyle = { width: '100%', padding: '9px 12px', border: `1.5px solid ${T.border}`, borderRadius: 7, fontSize: 12, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' };
@@ -194,9 +255,10 @@ export function TransportPage() {
         </div>
       </Card>
 
-      {loading ? (
-        <div style={{ textAlign: 'center', padding: 60, color: T.muted }}>Loading transporters…</div>
-      ) : (
+      {loadState === 'loading' && <LoadingState label="Loading transporters…" />}
+      {loadState === 'error' && <ErrorState message="Could not load transport providers." onRetry={load} />}
+      {loadState === 'ready' && transporters.length === 0 && <EmptyState icon="🚛" title="No transporters found" />}
+      {loadState === 'ready' && transporters.length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))', gap: 18 }}>
           {transporters.map(t => (
             <Card key={t.id}>
@@ -223,14 +285,14 @@ export function TransportPage() {
               </div>
               <div style={{ marginBottom: 14, fontSize: 12, color: T.muted }}>🗺️ Covers: {(t.provinces || []).join(' · ')}</div>
               {t.isVerified && <div style={{ fontSize: 11, color: T.teal, fontWeight: 700, marginBottom: 10 }}>✓ Platform Verified</div>}
-              <Btn variant="cyan" style={{ width: '100%' }} onClick={() => { setSelected(t); setBooked(false); }}>Get Quote & Book →</Btn>
+              <Btn variant="cyan" style={{ width: '100%' }} onClick={() => openBooking(t)}>Get Quote & Book →</Btn>
             </Card>
           ))}
         </div>
       )}
 
       {selected && !booked && (
-        <Modal title={`Book Transport — ${selected.name}`} onClose={() => setSelected(null)}>
+        <Modal title={`Book Transport — ${selected.name}`} onClose={() => { setSelected(null); setBookError(''); }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
             {[['PICKUP LOCATION', from || 'Sheikhupura, Punjab'], ['DELIVERY LOCATION', to || 'Karachi, Sindh']].map(([l, ph]) => (
               <div key={l}>
@@ -255,7 +317,10 @@ export function TransportPage() {
             <div style={{ fontSize: 11, color: T.muted, marginBottom: 2 }}>Estimated Rate</div>
             <div style={{ fontSize: 18, fontWeight: 800, color: '#0891B2' }}>{selected.price}</div>
           </div>
-          <Btn variant="cyan" style={{ width: '100%', padding: '11px' }} onClick={handleBook}>Confirm Booking →</Btn>
+          {bookError && (
+            <div style={{ background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 8, padding: '10px 12px', marginBottom: 14, fontSize: 12, color: '#B91C1C' }}>⚠ {bookError}</div>
+          )}
+          <Btn variant="cyan" style={{ width: '100%', padding: '11px' }} disabled={submitting} onClick={handleBook}>{submitting ? 'Booking…' : 'Confirm Booking →'}</Btn>
         </Modal>
       )}
       {selected && booked && (

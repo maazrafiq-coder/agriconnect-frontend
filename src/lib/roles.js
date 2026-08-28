@@ -7,7 +7,11 @@
 // Backend UserRole enum values that count as "seller" for route-guard
 // purposes. adaptUser() lowercases the raw enum (TRADER -> 'trader'), so
 // this must be checked against the enum's actual values.
-export const SELLER_ROLES = ['trader', 'farmer', 'miller'];
+// Includes 'exporter' — UserRole.EXPORTER is a real, distinct seller-side
+// business role (see AdminDashboard's user-creation form), not a synonym
+// for buyer. It was missing here, which meant an Exporter account fell
+// through to the generic buyer portal by default.
+export const SELLER_ROLES = ['trader', 'farmer', 'miller', 'exporter'];
 
 // role -> { path, icon, label }
 export const OPERATOR_PORTALS = {

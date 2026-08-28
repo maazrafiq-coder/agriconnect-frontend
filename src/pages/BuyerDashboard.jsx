@@ -2,8 +2,8 @@ import { useState, useEffect } from 'react';
 import { apiGetOrders, apiGetMyTestingRequests, apiGetSavedProducts } from '../lib/api';
 import { adaptOrders, adaptProducts, adaptTestingRequests } from '../lib/adapters';
 import { useNavigate } from 'react-router-dom';
-import { PRODUCTS, STATUS_COLORS as SC } from '../data';
-import { Card, Btn, Tabs } from '../components/ui';
+import { STATUS_COLORS as SC } from '../data';
+import { Card, Btn, Tabs, LoadingState, ErrorState, EmptyState, isDemoMode } from '../components/ui';
 import ProductCard from '../components/ProductCard';
 import T from '../theme';
 
@@ -21,22 +21,39 @@ const MOCK_TESTING = [
 export default function BuyerDashboard() {
   const navigate = useNavigate();
   const [tab, setTab] = useState('overview');
-  const [ORDERS, setORDERS] = useState(MOCK_ORDERS);
-  const [TESTING, setTESTING] = useState(MOCK_TESTING);
+  const [ORDERS, setORDERS] = useState([]);
+  const [ordersState, setOrdersState] = useState('loading'); // loading | ready | error
+  const [TESTING, setTESTING] = useState([]);
+  const [testingState, setTestingState] = useState('loading');
   const [savedProducts, setSavedProducts] = useState([]);
 
-  useEffect(() => {
+  const loadOrders = () => {
+    setOrdersState('loading');
     apiGetOrders('buyer')
-      .then(data => setORDERS(adaptOrders(Array.isArray(data) ? data : [])))
-      .catch(() => setORDERS(MOCK_ORDERS));
+      .then(data => { setORDERS(adaptOrders(Array.isArray(data) ? data : [])); setOrdersState('ready'); })
+      .catch(() => {
+        if (isDemoMode()) { setORDERS(MOCK_ORDERS); setOrdersState('ready'); }
+        else setOrdersState('error');
+      });
+  };
 
+  const loadTesting = () => {
+    setTestingState('loading');
     apiGetMyTestingRequests('requester')
-      .then(data => setTESTING(Array.isArray(data) && data.length ? adaptTestingRequests(data) : MOCK_TESTING))
-      .catch(() => setTESTING(MOCK_TESTING));
+      .then(data => { setTESTING(adaptTestingRequests(Array.isArray(data) ? data : [])); setTestingState('ready'); })
+      .catch(() => {
+        if (isDemoMode()) { setTESTING(MOCK_TESTING); setTestingState('ready'); }
+        else setTestingState('error');
+      });
+  };
+
+  useEffect(() => {
+    loadOrders();
+    loadTesting();
 
     apiGetSavedProducts()
       .then(data => setSavedProducts(adaptProducts((data || []).map(s => s.product))))
-      .catch(() => {});
+      .catch(() => setSavedProducts([]));
   }, []);
 
   const statsCards = [
@@ -80,7 +97,10 @@ export default function BuyerDashboard() {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
             <Card>
               <h3 style={{ margin: '0 0 14px', fontSize: 13, fontWeight: 800, color: '#2563EB' }}>Recent Orders</h3>
-              {ORDERS.map(o => (
+              {ordersState === 'loading' && <LoadingState label="Loading orders…" />}
+              {ordersState === 'error' && <ErrorState message="Could not load your orders." onRetry={loadOrders} />}
+              {ordersState === 'ready' && ORDERS.length === 0 && <EmptyState icon="📋" title="No orders yet" />}
+              {ordersState === 'ready' && ORDERS.slice(0, 5).map(o => (
                 <div key={o.id} style={{ padding: '10px 0', borderBottom: `1px solid ${T.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
                     <div style={{ fontWeight: 700, fontSize: 12 }}>{o.product}</div>
@@ -93,7 +113,10 @@ export default function BuyerDashboard() {
 
             <Card>
               <h3 style={{ margin: '0 0 14px', fontSize: 13, fontWeight: 800, color: '#059669' }}>Testing Reports</h3>
-              {TESTING.map(t => (
+              {testingState === 'loading' && <LoadingState label="Loading testing requests…" />}
+              {testingState === 'error' && <ErrorState message="Could not load testing requests." onRetry={loadTesting} />}
+              {testingState === 'ready' && TESTING.length === 0 && <EmptyState icon="🧪" title="No testing requests yet" />}
+              {testingState === 'ready' && TESTING.slice(0, 5).map(t => (
                 <div key={t.id} style={{ padding: '10px 0', borderBottom: `1px solid ${T.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
                     <div style={{ fontWeight: 700, fontSize: 12 }}>{t.product}</div>
@@ -117,9 +140,13 @@ export default function BuyerDashboard() {
             <h3 style={{ margin: 0, fontSize: 13, fontWeight: 800, color: T.green }}>Saved Products</h3>
             <Btn variant="secondary" size="sm" onClick={() => navigate('/marketplace')}>Browse More →</Btn>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(240px,1fr))', gap: 14 }}>
-            {(savedProducts.length > 0 ? savedProducts : PRODUCTS.slice(0, 3)).map(p => <ProductCard key={p.id} product={p} />)}
-          </div>
+          {savedProducts.length === 0 ? (
+            <EmptyState icon="❤️" title="No saved products yet" subtitle="Products you save while browsing the marketplace will show up here." />
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(240px,1fr))', gap: 14 }}>
+              {savedProducts.map(p => <ProductCard key={p.id} product={p} />)}
+            </div>
+          )}
         </div>
       )}
 
@@ -127,7 +154,10 @@ export default function BuyerDashboard() {
       {tab === 'orders' && (
         <Card>
           <h3 style={{ margin: '0 0 16px', fontSize: 13, fontWeight: 800, color: '#2563EB' }}>All Orders</h3>
-          {ORDERS.map(o => (
+          {ordersState === 'loading' && <LoadingState label="Loading orders…" />}
+          {ordersState === 'error' && <ErrorState message="Could not load your orders." onRetry={loadOrders} />}
+          {ordersState === 'ready' && ORDERS.length === 0 && <EmptyState icon="📋" title="No orders yet" subtitle="Orders you place in the marketplace will appear here." />}
+          {ordersState === 'ready' && ORDERS.map(o => (
             <div key={o.id} style={{ padding: '14px 0', borderBottom: `1px solid ${T.border}` }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
                 <div>
@@ -157,7 +187,10 @@ export default function BuyerDashboard() {
             <h3 style={{ margin: 0, fontSize: 13, fontWeight: 800, color: '#059669' }}>Testing Requests</h3>
             <Btn variant="teal" size="sm" onClick={() => navigate('/testing')}>+ Request Test</Btn>
           </div>
-          {TESTING.map(t => (
+          {testingState === 'loading' && <LoadingState label="Loading testing requests…" />}
+          {testingState === 'error' && <ErrorState message="Could not load testing requests." onRetry={loadTesting} />}
+          {testingState === 'ready' && TESTING.length === 0 && <EmptyState icon="🧪" title="No testing requests yet" subtitle="Request a lab test from a product page to see it here." />}
+          {testingState === 'ready' && TESTING.map(t => (
             <Card key={t.id} style={{ marginBottom: 12 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
                 <div>

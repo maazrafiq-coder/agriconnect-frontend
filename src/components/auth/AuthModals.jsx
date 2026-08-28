@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { Modal, Btn } from '../ui';
-import { apiRegister, apiVerifyOtp, apiLogin } from '../../lib/api';
+import { apiRegister, apiVerifyOtp, apiLogin, apiSubmitKyc } from '../../lib/api';
 import { adaptUser } from '../../lib/adapters';
+import { portalPathForRole } from '../../lib/roles';
 import T from '../../theme';
 
 const inputStyle = { width: '100%', padding: '9px 12px', border: `1.5px solid ${T.border}`, borderRadius: 7, fontSize: 13, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' };
@@ -43,8 +44,11 @@ export function LoginModal() {
       const adapted = adaptUser(result.user);
       loginWithUser(adapted);
       closeModal();
-      const SELLER_ROLES = ['trader', 'farmer', 'miller'];
-      navigate(adapted.role === 'admin' ? '/admin' : SELLER_ROLES.includes(adapted.role) ? '/seller' : '/buyer');
+      // Central role -> portal mapping (src/lib/roles.js) — was previously
+      // duplicated here as a local SELLER_ROLES array that only handled
+      // buyer/seller/admin and silently dropped every operator role
+      // (warehouse, testing agency, transporter) onto the buyer portal.
+      navigate(portalPathForRole(adapted.role));
     } catch (err) {
       setError(err.message || 'Login failed. Check your credentials.');
     } finally {
@@ -101,12 +105,24 @@ export function RegisterModal() {
   const [loading, setLoading]   = useState(false);
   const [devOtp, setDevOtp]     = useState('');
   const [registeredIdentifier, setRegisteredIdentifier] = useState('');
+  // fieldName -> File, e.g. { cnicFront: File, businessLicense: File }
+  const [kycFiles, setKycFiles]       = useState({});
+  const [kycError, setKycError]       = useState('');
+  const [kycSubmitting, setKycSubmitting] = useState(false);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
-  // Frontend role labels -> backend UserRole enum values
+  // Frontend role labels -> backend UserRole enum values.
+  // Buyer used to incorrectly map to EXPORTER (a real, distinct seller-side
+  // business role — see AdminDashboard's own user-creation form, which
+  // already lists BUYER and EXPORTER as separate options). That silently
+  // turned every new buyer into an exporter account. UserRole already has
+  // a dedicated BUYER value; it just wasn't being used here.
+  // Seller intentionally maps to TRADER, which is already this app's
+  // generic "seller" role everywhere else (see SELLER_ROLES in
+  // src/lib/roles.js) — that part of the original mapping was correct.
   const ROLE_MAP = {
-    buyer: 'EXPORTER',
+    buyer: 'BUYER',
     seller: 'TRADER',
     transporter: 'TRANSPORTER',
     testing_agency: 'TESTING_AGENCY',
@@ -125,7 +141,7 @@ export function RegisterModal() {
         phoneNumber: form.phone || undefined,
         email: form.email || undefined,
         password: form.password,
-        role: ROLE_MAP[role] || 'EXPORTER',
+        role: ROLE_MAP[role] || 'BUYER',
         fullName: form.fullName,
       });
       if (result.devOtp) setDevOtp(result.devOtp);
@@ -162,6 +178,30 @@ export function RegisterModal() {
     next[i] = val;
     setOtp(next);
     if (val && i < 5) document.getElementById(`otp-${i + 1}`)?.focus();
+  };
+
+  const handleKycFilePick = (fieldName, file) => {
+    setKycFiles(f => ({ ...f, [fieldName]: file }));
+  };
+
+  const handleKycSubmit = async () => {
+    const selected = Object.entries(kycFiles).filter(([, file]) => file);
+    // Nothing selected — same as "Skip for now", documents can be added
+    // later from the user's own portal once they're approved and logged in.
+    if (selected.length === 0) { setStep(4); return; }
+
+    setKycError('');
+    setKycSubmitting(true);
+    try {
+      const formData = new FormData();
+      selected.forEach(([fieldName, file]) => formData.append(fieldName, file));
+      await apiSubmitKyc(formData);
+      setStep(4);
+    } catch (err) {
+      setKycError(err.message || 'Document upload failed. You can try again, or skip and add them later from your portal.');
+    } finally {
+      setKycSubmitting(false);
+    }
   };
 
   return (
@@ -240,19 +280,37 @@ export function RegisterModal() {
       {step === 3 && (
         <>
           <p style={{ color: T.muted, fontSize: 13, marginBottom: 16 }}>
-            Optional: upload supporting documents now (CNIC, business license, certifications) to speed up review — or skip and add them later from your dashboard.
+            Optional: upload supporting documents now to speed up review — or skip and add them later from your portal once approved.
           </p>
-          {[['🪪', 'CNIC Front Side', 'cnic_front'], ['🪪', 'CNIC Back Side', 'cnic_back']].map(([icon, title, name]) => (
-            <label key={name} style={{ border: `2px dashed ${T.border}`, borderRadius: 10, padding: 20, textAlign: 'center', marginBottom: 12, cursor: 'pointer', display: 'block' }}>
-              <div style={{ fontSize: 32, marginBottom: 6 }}>{icon}</div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: T.green }}>{title}</div>
-              <div style={{ fontSize: 11, color: T.muted }}>Click to upload (optional) · JPG, PNG or PDF</div>
-              <input type="file" name={name} accept=".jpg,.jpeg,.png,.pdf" style={{ display: 'none' }} />
-            </label>
-          ))}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            <Btn variant="ghost" onClick={() => setStep(4)}>Skip for now</Btn>
-            <Btn variant="primary" onClick={() => setStep(4)}>Continue →</Btn>
+          {[
+            ['🪪', 'CNIC Front Side', 'cnicFront'],
+            ['🪪', 'CNIC Back Side', 'cnicBack'],
+            ['🏢', 'Company Registration', 'companyRegistration'],
+            ['📄', 'Business License', 'businessLicense'],
+          ].map(([icon, title, name]) => {
+            const file = kycFiles[name];
+            return (
+              <label key={name} style={{ border: `2px dashed ${file ? T.green : T.border}`, background: file ? '#F0FDF4' : 'transparent', borderRadius: 10, padding: 16, textAlign: 'center', marginBottom: 10, cursor: 'pointer', display: 'block' }}>
+                <div style={{ fontSize: 26, marginBottom: 4 }}>{file ? '✅' : icon}</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: T.green }}>{title}</div>
+                <div style={{ fontSize: 11, color: T.muted, wordBreak: 'break-all', padding: '0 8px' }}>
+                  {file ? file.name : 'Click to upload (optional) · JPG, PNG or PDF'}
+                </div>
+                <input
+                  type="file"
+                  accept=".jpg,.jpeg,.png,.pdf"
+                  style={{ display: 'none' }}
+                  onChange={e => handleKycFilePick(name, e.target.files?.[0] || null)}
+                />
+              </label>
+            );
+          })}
+          {kycError && <div style={{ fontSize: 12, color: T.danger, marginTop: 6, marginBottom: 10, background: '#FEE2E2', padding: '8px 12px', borderRadius: 7 }}>⚠ {kycError}</div>}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 4 }}>
+            <Btn variant="ghost" onClick={() => setStep(4)} disabled={kycSubmitting}>Skip for now</Btn>
+            <Btn variant="primary" onClick={handleKycSubmit} disabled={kycSubmitting}>
+              {kycSubmitting ? 'Uploading…' : 'Continue →'}
+            </Btn>
           </div>
         </>
       )}

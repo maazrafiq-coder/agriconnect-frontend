@@ -2,9 +2,11 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   apiGetMyProvider, apiRegisterProvider, apiUpdateTracking,
+  apiGetMyProviderClarifications, apiRespondToClarification,
 } from '../lib/api';
 import { Card, Btn, Badge, Tabs, Modal } from '../components/ui';
 import MediaManagerModal from '../components/MediaManager';
+import ClarificationThread from '../components/ClarificationThread';
 import T from '../theme';
 
 const inputStyle = {
@@ -201,6 +203,18 @@ export default function TransportProviderDashboard() {
   const [data, setData] = useState(null);
   const [mediaOpen, setMediaOpen] = useState(false);
   const [trackingRequest, setTrackingRequest] = useState(null);
+  const [clarifications, setClarifications] = useState([]);
+
+  const loadClarifications = () => {
+    apiGetMyProviderClarifications('TRANSPORT_PROFILE')
+      .then(d => setClarifications(Array.isArray(d) ? d : []))
+      .catch(() => {});
+  };
+
+  const handleRespondToClarification = async (id, message, files) => {
+    await apiRespondToClarification(id, message, files);
+    loadClarifications();
+  };
 
   const load = () => {
     setLoading(true);
@@ -211,6 +225,7 @@ export default function TransportProviderDashboard() {
   };
 
   useEffect(load, []);
+  useEffect(loadClarifications, []);
 
   if (loading) {
     return <div style={{ padding: 60, textAlign: 'center', color: T.muted, fontFamily: 'Inter,sans-serif' }}>Loading your transport dashboard…</div>;
@@ -281,6 +296,19 @@ export default function TransportProviderDashboard() {
               </Card>
             ))}
           </div>
+        )}
+
+        {clarifications.length > 0 && (
+          <>
+            <h3 style={{ fontSize: 14, fontWeight: 800, color: T.green, margin: '24px 0 12px' }}>
+              🔍 Listing Review {clarifications.filter(c => c.status === 'OPEN').length > 0 && `(${clarifications.filter(c => c.status === 'OPEN').length})`}
+            </h3>
+            <ClarificationThread
+              clarifications={clarifications}
+              viewerRole="subject"
+              onRespond={handleRespondToClarification}
+            />
+          </>
         )}
       </div>
 

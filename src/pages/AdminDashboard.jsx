@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
-  apiAdminGetUsers, apiAdminUpdateKyc, apiAdminSetUserActive,
-  apiAdminGetProducts, apiAdminRemoveProduct, apiAdminRestoreProduct,
+  apiAdminGetUsers, apiAdminSetUserActive,
+  apiAdminGetProducts, apiAdminApproveProduct, apiAdminRejectProduct, apiAdminRemoveProduct, apiAdminRestoreProduct,
   apiAdminGetOrders, apiAdminResolveDispute,
   apiAdminGetWarehouses, apiAdminVerifyWarehouse, apiAdminSetWarehouseActive,
   apiAdminGetCategories, apiAdminCreateCategory, apiAdminUpdateCategory,
@@ -13,8 +13,11 @@ import {
   apiAdminCreateUser, apiAdminResetUserPassword,
   apiAdminGetAllAgencies, apiAdminGetAllTransporters,
   apiAdminSetTestingAgencyActive, apiAdminSetTransportActive,
+  apiAdminVerifyTestingAgency, apiAdminVerifyTransport,
+  apiRequestClarification,
 } from '../lib/api';
 import { Card, Btn, Badge, Modal } from '../components/ui';
+import AdminUserDetailModal from '../components/admin/AdminUserDetailModal';
 import { STATUS_COLORS as SC } from '../data';
 import T from '../theme';
 
@@ -56,6 +59,8 @@ export default function AdminDashboard() {
   const [section, setSection] = useState('dashboard');
   const [userSearch, setUserSearch] = useState('');
   const [subTab, setSubTab] = useState(null);
+  const [kycFilter, setKycFilter] = useState('ALL');
+  const [orderStatusFilter, setOrderStatusFilter] = useState('ALL');
 
   // Data
   const [users, setUsers] = useState([]);
@@ -75,6 +80,22 @@ export default function AdminDashboard() {
   const [disputeModal, setDisputeModal] = useState(null);
 
   const [loadError, setLoadError] = useState(null);
+
+  // Round 2, Milestone 6 — admin opens a clarification request against a
+  // provider listing (warehouse/testing agency/transport). Reuses the
+  // same generic subjectType/subjectId endpoint, and the same
+  // prompt()-based UX already used for KYC info-requests in
+  // AdminUserDetailModal.jsx. Purely communicative — see
+  // ReviewService.requestClarification's comment: unlike KYC, this has
+  // no automatic effect on isActive/isVerified.
+  const handleRequestProviderInfo = async (subjectType, subjectId) => {
+    const note = prompt('What additional information is needed from this provider?');
+    if (!note) return;
+    try {
+      await apiRequestClarification(subjectType, subjectId, note);
+      alert('Clarification request sent — the operator will see it on their dashboard.');
+    } catch (e) { alert(e.message); }
+  };
 
   const loadAll = () => {
     setLoading(true);
@@ -108,12 +129,12 @@ export default function AdminDashboard() {
   const platformFees = orders.reduce((s, o) => s + Number(o.platformFee || 0), 0);
 
   const statCards = [
-    ['👥', 'Total Users', users.length, T.green],
-    ['⏳', 'Pending KYC', pendingKyc, T.warn],
-    ['🌾', 'Active Listings', activeListings, T.mid],
-    ['📋', 'Total Orders', orders.length, T.info],
-    ['⚠️', 'Disputed Orders', disputedOrders, T.danger],
-    ['💰', 'Platform Revenue', `₨${platformFees.toLocaleString()}`, T.gold],
+    ['👥', 'Total Users', users.length, T.green, () => { setSection('users'); setKycFilter('ALL'); }],
+    ['⏳', 'Pending KYC', pendingKyc, T.warn, () => { setSection('users'); setKycFilter('SUBMITTED'); }],
+    ['🌾', 'Active Listings', activeListings, T.mid, () => { setSection('marketplace'); setSubTab('products'); }],
+    ['📋', 'Total Orders', orders.length, T.info, () => { setSection('marketplace'); setSubTab('orders'); setOrderStatusFilter('ALL'); }],
+    ['⚠️', 'Disputed Orders', disputedOrders, T.danger, () => { setSection('marketplace'); setSubTab('orders'); setOrderStatusFilter('DISPUTED'); }],
+    ['💰', 'Platform Revenue', `₨${platformFees.toLocaleString()}`, T.gold, () => setSection('payments')],
   ];
 
   return (
@@ -159,8 +180,8 @@ export default function AdminDashboard() {
             <p style={{ fontSize: 13, color: T.muted, margin: '0 0 24px' }}>Platform overview and pending actions</p>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(180px,1fr))', gap: 14, marginBottom: 28 }}>
-              {statCards.map(([icon, label, val, color]) => (
-                <Card key={label} style={{ padding: 16, position: 'relative', overflow: 'hidden' }}>
+              {statCards.map(([icon, label, val, color, onClick]) => (
+                <Card key={label} onClick={onClick} style={{ padding: 16, position: 'relative', overflow: 'hidden' }}>
                   <div style={{ fontSize: 11, color: T.muted, fontWeight: 700, marginBottom: 6 }}>{label}</div>
                   <div style={{ fontSize: 22, fontWeight: 900, color }}>{loading ? '…' : val}</div>
                   <div style={{ fontSize: 28, position: 'absolute', opacity: 0.06, right: 12, top: 10 }}>{icon}</div>
@@ -174,7 +195,7 @@ export default function AdminDashboard() {
                 {users.filter(u => u.kycStatus === 'SUBMITTED').slice(0, 5).map(u => (
                   <div key={u.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: `1px solid ${T.border}`, fontSize: 12 }}>
                     <span>{u.profile?.fullName || u.phoneNumber}</span>
-                    <Btn variant="secondary" size="sm" onClick={() => { setSection('users'); }}>Review</Btn>
+                    <Btn variant="secondary" size="sm" onClick={() => { setSection('users'); setKycFilter('SUBMITTED'); }}>Review</Btn>
                   </div>
                 ))}
                 {pendingKyc === 0 && <p style={{ fontSize: 12, color: T.muted }}>No pending KYC reviews.</p>}
@@ -207,26 +228,40 @@ export default function AdminDashboard() {
               </div>
             </div>
 
-            <div style={{ position: 'relative', maxWidth: 340, marginBottom: 14 }}>
-              <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: T.muted, fontSize: 14 }}>🔍</span>
-              <input value={userSearch} onChange={e => setUserSearch(e.target.value)} placeholder="Search by name, phone, role, city…"
-                style={{ width: '100%', padding: '9px 12px 9px 34px', border: `1.5px solid ${T.border}`, borderRadius: 8, fontSize: 13, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' }} />
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 14, flexWrap: 'wrap' }}>
+              <div style={{ position: 'relative', maxWidth: 340, flex: 1, minWidth: 220 }}>
+                <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: T.muted, fontSize: 14 }}>🔍</span>
+                <input value={userSearch} onChange={e => setUserSearch(e.target.value)} placeholder="Search by AgriConnect ID, name, phone, role, city…"
+                  style={{ width: '100%', padding: '9px 12px 9px 34px', border: `1.5px solid ${T.border}`, borderRadius: 8, fontSize: 13, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' }} />
+              </div>
+              <select value={kycFilter} onChange={e => setKycFilter(e.target.value)}
+                style={{ padding: '9px 12px', border: `1.5px solid ${T.border}`, borderRadius: 8, fontSize: 12, fontFamily: 'inherit', outline: 'none', background: T.white }}>
+                <option value="ALL">All KYC statuses</option>
+                <option value="SUBMITTED">Pending (Submitted)</option>
+                <option value="RECOMMENDED">Recommended</option>
+                <option value="INFO_REQUESTED">Info Requested</option>
+                <option value="APPROVED">Approved</option>
+                <option value="REJECTED">Rejected</option>
+                <option value="PENDING">Not Submitted</option>
+              </select>
             </div>
 
             <Card style={{ padding: 0, overflow: 'hidden' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead>
                   <tr style={{ background: T.green }}>
-                    {['User', 'Role', 'City', 'KYC Status', 'Account', 'Actions'].map(h => (
+                    {['AgriConnect ID', 'User', 'Role', 'City', 'KYC Status', 'Account', 'Actions'].map(h => (
                       <th key={h} style={{ padding: '10px 14px', color: '#fff', textAlign: 'left', fontWeight: 700 }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {users.filter(u => {
+                    if (kycFilter !== 'ALL' && u.kycStatus !== kycFilter) return false;
                     if (!userSearch) return true;
                     const q = userSearch.toLowerCase();
                     return (
+                      u.agriConnectId?.toLowerCase().includes(q) ||
                       u.profile?.fullName?.toLowerCase().includes(q) ||
                       u.phoneNumber?.toLowerCase().includes(q) ||
                       u.role?.toLowerCase().includes(q) ||
@@ -234,6 +269,7 @@ export default function AdminDashboard() {
                     );
                   }).map((u, i) => (
                     <tr key={u.id} style={{ background: i % 2 === 0 ? T.surface : T.white }}>
+                      <td style={{ padding: '10px 14px', fontFamily: 'monospace', fontWeight: 700, color: T.green }}>{u.agriConnectId || '—'}</td>
                       <td style={{ padding: '10px 14px' }}>
                         <div style={{ fontWeight: 700 }}>{u.profile?.fullName || '—'}</div>
                         <div style={{ fontSize: 10, color: T.muted }}>{u.phoneNumber}</div>
@@ -251,7 +287,8 @@ export default function AdminDashboard() {
                         <span style={{ color: u.isActive ? '#15803D' : T.danger, fontWeight: 700 }}>{u.isActive ? 'Active' : 'Suspended'}</span>
                       </td>
                       <td style={{ padding: '10px 14px' }}>
-                        <div style={{ display: 'flex', gap: 6 }}>
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                          <Btn variant="secondary" size="sm" onClick={() => setKycModal(u)}>View Profile</Btn>
                           {u.kycStatus === 'SUBMITTED' && (
                             <Btn variant="primary" size="sm" onClick={() => setKycModal(u)}>Review KYC</Btn>
                           )}
@@ -267,7 +304,7 @@ export default function AdminDashboard() {
                     </tr>
                   ))}
                   {users.length === 0 && !loading && (
-                    <tr><td colSpan={6} style={{ padding: 20, textAlign: 'center', color: T.muted }}>No users found.</td></tr>
+                    <tr><td colSpan={7} style={{ padding: 20, textAlign: 'center', color: T.muted }}>No users found.</td></tr>
                   )}
                 </tbody>
               </table>
@@ -299,29 +336,57 @@ export default function AdminDashboard() {
 
             {(subTab || 'products') === 'products' && (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))', gap: 14 }}>
-                {products.map(p => (
-                  <Card key={p.id}>
+                {[...products].sort((a, b) => (a.status === 'PENDING_REVIEW' ? -1 : 0) - (b.status === 'PENDING_REVIEW' ? -1 : 0)).map(p => (
+                  <Card key={p.id} style={p.status === 'PENDING_REVIEW' ? { border: `1.5px solid #FBBF24` } : undefined}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
                       <div>
                         <div style={{ fontWeight: 700, fontSize: 13 }}>{p.name}</div>
                         <div style={{ fontSize: 11, color: T.muted }}>{p.seller?.profile?.fullName} · {p.category}</div>
                       </div>
-                      <Badge label={p.status} type={p.status === 'ACTIVE' ? 'green' : p.status === 'REMOVED' ? 'red' : 'gray'} />
+                      <Badge label={p.status.replace(/_/g, ' ')} type={
+                        p.status === 'ACTIVE' ? 'green'
+                        : p.status === 'PENDING_REVIEW' ? 'gold'
+                        : p.status === 'REJECTED' || p.status === 'REMOVED' ? 'red'
+                        : 'gray'
+                      } />
                     </div>
                     <div style={{ fontSize: 12, color: T.muted, marginBottom: 10 }}>
                       {p.quantity} {p.unit} · ₨{Number(p.askingPrice).toLocaleString()} · {p._count?.offers || 0} offers
                     </div>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      {p.status !== 'REMOVED' ? (
+                    {p.status === 'REJECTED' && p.rejectionNote && (
+                      <div style={{ fontSize: 11, color: T.danger, background: '#FEE2E2', padding: '6px 8px', borderRadius: 6, marginBottom: 10 }}>
+                        Rejected: {p.rejectionNote}
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      {p.status === 'PENDING_REVIEW' && (
+                        <>
+                          <Btn variant="primary" size="sm" onClick={async () => {
+                            try {
+                              await apiAdminApproveProduct(p.id);
+                              setProducts(prev => prev.map(x => x.id === p.id ? { ...x, status: 'ACTIVE' } : x));
+                            } catch (e) { alert(e.message); }
+                          }}>✅ Approve</Btn>
+                          <Btn variant="danger" size="sm" onClick={async () => {
+                            const reason = prompt('Reason for rejecting this listing:');
+                            if (!reason) return;
+                            try {
+                              await apiAdminRejectProduct(p.id, reason);
+                              setProducts(prev => prev.map(x => x.id === p.id ? { ...x, status: 'REJECTED', rejectionNote: reason } : x));
+                            } catch (e) { alert(e.message); }
+                          }}>❌ Reject</Btn>
+                        </>
+                      )}
+                      {p.status !== 'REMOVED' && p.status !== 'PENDING_REVIEW' ? (
                         <Btn variant="danger" size="sm" onClick={() => setRemoveModal(p)}>Remove</Btn>
-                      ) : (
+                      ) : p.status === 'REMOVED' ? (
                         <Btn variant="secondary" size="sm" onClick={async () => {
                           try {
                             await apiAdminRestoreProduct(p.id);
                             setProducts(prev => prev.map(x => x.id === p.id ? { ...x, status: 'ACTIVE' } : x));
                           } catch (e) { alert(e.message); }
                         }}>Restore</Btn>
-                      )}
+                      ) : null}
                     </div>
                   </Card>
                 ))}
@@ -334,7 +399,21 @@ export default function AdminDashboard() {
             {subTab === 'categories' && <CategoriesPanel />}
 
             {subTab === 'orders' && (
-              <Card style={{ padding: 0, overflow: 'hidden' }}>
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+                  <select value={orderStatusFilter} onChange={e => setOrderStatusFilter(e.target.value)}
+                    style={{ padding: '8px 12px', border: `1.5px solid ${T.border}`, borderRadius: 8, fontSize: 12, fontFamily: 'inherit', outline: 'none', background: T.white }}>
+                    <option value="ALL">All statuses</option>
+                    <option value="PENDING">Pending</option>
+                    <option value="CONFIRMED">Confirmed</option>
+                    <option value="IN_TRANSIT">In Transit</option>
+                    <option value="DELIVERED">Delivered</option>
+                    <option value="COMPLETED">Completed</option>
+                    <option value="CANCELLED">Cancelled</option>
+                    <option value="DISPUTED">Disputed</option>
+                  </select>
+                </div>
+                <Card style={{ padding: 0, overflow: 'hidden' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                   <thead>
                     <tr style={{ background: T.green }}>
@@ -344,7 +423,7 @@ export default function AdminDashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {orders.map((o, i) => (
+                    {orders.filter(o => orderStatusFilter === 'ALL' || o.status === orderStatusFilter).map((o, i) => (
                       <tr key={o.id} style={{ background: i % 2 === 0 ? T.surface : T.white }}>
                         <td style={{ padding: '10px 14px', fontFamily: 'monospace', fontSize: 11 }}>{o.id.slice(0, 8)}</td>
                         <td style={{ padding: '10px 14px' }}>{o.buyer?.profile?.fullName || '—'}</td>
@@ -355,12 +434,13 @@ export default function AdminDashboard() {
                         </td>
                       </tr>
                     ))}
-                    {orders.length === 0 && !loading && (
+                    {orders.filter(o => orderStatusFilter === 'ALL' || o.status === orderStatusFilter).length === 0 && !loading && (
                       <tr><td colSpan={5} style={{ padding: 20, textAlign: 'center', color: T.muted }}>No orders found.</td></tr>
                     )}
                   </tbody>
                 </table>
-              </Card>
+                </Card>
+              </div>
             )}
           </div>
         )}
@@ -457,6 +537,7 @@ export default function AdminDashboard() {
                               setWarehouses(prev => prev.map(x => x.id === w.id ? { ...x, isActive: !x.isActive } : x));
                             } catch (e) { alert(e.message); }
                           }}>{w.isActive ? 'Delist' : 'Relist'}</Btn>
+                          <Btn variant="ghost" size="sm" onClick={() => handleRequestProviderInfo('WAREHOUSE_PROFILE', w.id)}>Request Info</Btn>
                         </div>
                       </td>
                     </tr>
@@ -473,7 +554,7 @@ export default function AdminDashboard() {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead>
                   <tr style={{ background: T.teal }}>
-                    {['Agency', 'City', 'Listed', 'Actions'].map(h => (
+                    {['Agency', 'City', 'Verified', 'Listed', 'Actions'].map(h => (
                       <th key={h} style={{ padding: '10px 14px', color: '#fff', textAlign: 'left', fontWeight: 700 }}>{h}</th>
                     ))}
                   </tr>
@@ -483,19 +564,27 @@ export default function AdminDashboard() {
                     <tr key={a.id} style={{ background: i % 2 === 0 ? T.surface : T.white, opacity: a.isActive ? 1 : 0.55 }}>
                       <td style={{ padding: '10px 14px', fontWeight: 700 }}>{a.name}</td>
                       <td style={{ padding: '10px 14px' }}>{a.city}</td>
+                      <td style={{ padding: '10px 14px' }}>{a.isVerified ? '✅ Verified' : '⏳ Pending'}</td>
                       <td style={{ padding: '10px 14px' }}>{a.isActive ? '🟢 Listed' : '🔴 Delisted'}</td>
-                      <td style={{ padding: '10px 14px' }}>
+                      <td style={{ padding: '10px 14px', display: 'flex', gap: 6 }}>
+                        <Btn variant={a.isVerified ? 'ghost' : 'primary'} size="sm" onClick={async () => {
+                          try {
+                            await apiAdminVerifyTestingAgency(a.id, !a.isVerified);
+                            setTestingAgencies(prev => prev.map(x => x.id === a.id ? { ...x, isVerified: !x.isVerified } : x));
+                          } catch (e) { alert(e.message); }
+                        }}>{a.isVerified ? 'Unverify' : 'Verify'}</Btn>
                         <Btn variant={a.isActive ? 'danger' : 'secondary'} size="sm" onClick={async () => {
                           try {
                             await apiAdminSetTestingAgencyActive(a.id, !a.isActive);
                             setTestingAgencies(prev => prev.map(x => x.id === a.id ? { ...x, isActive: !x.isActive } : x));
                           } catch (e) { alert(e.message); }
                         }}>{a.isActive ? 'Delist' : 'Relist'}</Btn>
+                        <Btn variant="ghost" size="sm" onClick={() => handleRequestProviderInfo('TESTING_AGENCY_PROFILE', a.id)}>Request Info</Btn>
                       </td>
                     </tr>
                   ))}
                   {testingAgencies.length === 0 && !loading && (
-                    <tr><td colSpan={4} style={{ padding: 20, textAlign: 'center', color: T.muted }}>No testing agencies registered.</td></tr>
+                    <tr><td colSpan={5} style={{ padding: 20, textAlign: 'center', color: T.muted }}>No testing agencies registered.</td></tr>
                   )}
                 </tbody>
               </table>
@@ -506,7 +595,7 @@ export default function AdminDashboard() {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead>
                   <tr style={{ background: T.cyan }}>
-                    {['Company', 'Listed', 'Actions'].map(h => (
+                    {['Company', 'Verified', 'Listed', 'Actions'].map(h => (
                       <th key={h} style={{ padding: '10px 14px', color: '#fff', textAlign: 'left', fontWeight: 700 }}>{h}</th>
                     ))}
                   </tr>
@@ -515,19 +604,27 @@ export default function AdminDashboard() {
                   {transporters.map((t, i) => (
                     <tr key={t.id} style={{ background: i % 2 === 0 ? T.surface : T.white, opacity: t.isActive ? 1 : 0.55 }}>
                       <td style={{ padding: '10px 14px', fontWeight: 700 }}>{t.companyName}</td>
+                      <td style={{ padding: '10px 14px' }}>{t.isVerified ? '✅ Verified' : '⏳ Pending'}</td>
                       <td style={{ padding: '10px 14px' }}>{t.isActive ? '🟢 Listed' : '🔴 Delisted'}</td>
-                      <td style={{ padding: '10px 14px' }}>
+                      <td style={{ padding: '10px 14px', display: 'flex', gap: 6 }}>
+                        <Btn variant={t.isVerified ? 'ghost' : 'primary'} size="sm" onClick={async () => {
+                          try {
+                            await apiAdminVerifyTransport(t.id, !t.isVerified);
+                            setTransporters(prev => prev.map(x => x.id === t.id ? { ...x, isVerified: !x.isVerified } : x));
+                          } catch (e) { alert(e.message); }
+                        }}>{t.isVerified ? 'Unverify' : 'Verify'}</Btn>
                         <Btn variant={t.isActive ? 'danger' : 'secondary'} size="sm" onClick={async () => {
                           try {
                             await apiAdminSetTransportActive(t.id, !t.isActive);
                             setTransporters(prev => prev.map(x => x.id === t.id ? { ...x, isActive: !x.isActive } : x));
                           } catch (e) { alert(e.message); }
                         }}>{t.isActive ? 'Delist' : 'Relist'}</Btn>
+                        <Btn variant="ghost" size="sm" onClick={() => handleRequestProviderInfo('TRANSPORT_PROFILE', t.id)}>Request Info</Btn>
                       </td>
                     </tr>
                   ))}
                   {transporters.length === 0 && !loading && (
-                    <tr><td colSpan={3} style={{ padding: 20, textAlign: 'center', color: T.muted }}>No transport providers registered.</td></tr>
+                    <tr><td colSpan={4} style={{ padding: 20, textAlign: 'center', color: T.muted }}>No transport providers registered.</td></tr>
                   )}
                 </tbody>
               </table>
@@ -545,33 +642,15 @@ export default function AdminDashboard() {
         {section === 'security' && <ComingSoon title="Security Center" features={['Audit logs', 'Login history', 'Two-factor authentication', 'Active session management']} />}
       </div>
 
-      {/* KYC REVIEW MODAL */}
+      {/* ADMIN — VIEW COMPLETE PROFILE / KYC REVIEW */}
       {kycModal && (
-        <Modal title={`Review KYC — ${kycModal.profile?.fullName || kycModal.phoneNumber}`} onClose={() => setKycModal(null)}>
-          <div style={{ background: T.surface, borderRadius: 8, padding: 14, marginBottom: 16 }}>
-            <div style={{ fontSize: 12, color: T.muted, marginBottom: 4 }}>Role: <strong>{kycModal.role}</strong></div>
-            <div style={{ fontSize: 12, color: T.muted, marginBottom: 4 }}>Phone: <strong>{kycModal.phoneNumber}</strong></div>
-            <div style={{ fontSize: 12, color: T.muted }}>City: <strong>{kycModal.profile?.city || '—'}</strong></div>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            <Btn variant="primary" onClick={async () => {
-              try {
-                await apiAdminUpdateKyc(kycModal.id, 'APPROVED');
-                setUsers(prev => prev.map(x => x.id === kycModal.id ? { ...x, kycStatus: 'APPROVED' } : x));
-                setKycModal(null);
-              } catch (e) { alert(e.message); }
-            }}>✅ Approve</Btn>
-            <Btn variant="danger" onClick={async () => {
-              const note = prompt('Reason for rejection:');
-              if (!note) return;
-              try {
-                await apiAdminUpdateKyc(kycModal.id, 'REJECTED', note);
-                setUsers(prev => prev.map(x => x.id === kycModal.id ? { ...x, kycStatus: 'REJECTED' } : x));
-                setKycModal(null);
-              } catch (e) { alert(e.message); }
-            }}>❌ Reject</Btn>
-          </div>
-        </Modal>
+        <AdminUserDetailModal
+          userId={kycModal.id}
+          onClose={() => setKycModal(null)}
+          onKycChanged={(userId, status) => {
+            setUsers(prev => prev.map(x => x.id === userId ? { ...x, kycStatus: status } : x));
+          }}
+        />
       )}
 
       {createUserModal && (

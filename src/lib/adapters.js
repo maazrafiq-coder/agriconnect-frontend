@@ -57,6 +57,7 @@ export function adaptProduct(p) {
     packagingType:  p.packagingType || '',
     deliveryTerms:  p.deliveryTerms || '',
     status:         p.status,
+    rejectionNote:  p.rejectionNote || null,
     viewCount:      p.viewCount || 0,
     badge:          deriveBadge(p),
     certs,
@@ -176,6 +177,39 @@ export function adaptReceipt(r) {
 
 export function adaptReceipts(list = []) {
   return list.map(adaptReceipt);
+}
+
+// ─── WAREHOUSE BOOKING ADAPTER ─────────────────────────────────────────────
+export function adaptBooking(b) {
+  if (!b) return null;
+  return {
+    id:              b.id,
+    reference:       b.bookingReference || '',
+    warehouseId:     b.warehouseId,
+    warehouseName:   b.warehouse?.name || '',
+    warehouseCity:   b.warehouse?.city || '',
+    warehousePhone:  b.warehouse?.managerPhone || '',
+    depositorName:   b.depositor?.profile?.fullName || '',
+    depositorCity:   b.depositor?.profile?.city || '',
+    commodity:       b.commodity,
+    variety:         b.variety || '',
+    qty:             b.quantityTons,
+    entryDate:       b.entryDate?.slice(0, 10),
+    exitDate:        b.exitDate?.slice(0, 10),
+    durationDays:    b.durationDays,
+    totalCost:       Number(b.totalCost),
+    status:          b.status?.toLowerCase(),
+    rejectionReason: b.rejectionReason || '',
+    cancelReason:    b.cancelReason || '',
+    receiptId:       b.receipt?.id || null,
+    receiptNumber:   b.receipt?.receiptNumber || null,
+    createdAt:       b.createdAt,
+    _raw: b,
+  };
+}
+
+export function adaptBookings(list = []) {
+  return list.map(adaptBooking);
 }
 
 // ─── OFFER ADAPTER ────────────────────────────────────────────────────────────
@@ -331,6 +365,7 @@ export function adaptUser(u) {
   if (!u) return null;
   return {
     id:       u.id,
+    agriConnectId: u.agriConnectId || null,
     name:     u.profile?.fullName || u.profile?.businessName || 'User',
     role:     u.role?.toLowerCase(),
     email:    u.email || '',
