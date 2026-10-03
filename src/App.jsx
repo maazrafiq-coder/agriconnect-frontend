@@ -7,6 +7,7 @@ import { LoginModal, RegisterModal } from './components/auth/AuthModals';
 import HomePage         from './pages/HomePage';
 import MarketplacePage  from './pages/MarketplacePage';
 import ProductDetailPage from './pages/ProductDetailPage';
+import SellerProfilePage from './pages/SellerProfilePage';
 import { TestingPage, TransportPage } from './pages/ServicePages';
 import WarehousePage from './pages/WarehousePage';
 import SellerDashboard  from './pages/SellerDashboard';
@@ -39,6 +40,7 @@ function AppInner() {
         <Route path="/"            element={<HomePage />} />
         <Route path="/marketplace" element={<MarketplacePage />} />
         <Route path="/product/:id" element={<ProductDetailPage />} />
+        <Route path="/seller/:id" element={<SellerProfilePage />} />
         <Route path="/testing"     element={<TestingPage />} />
         <Route path="/transport"   element={<TransportPage />} />
         <Route path="/warehouse"   element={<WarehousePage />} />

@@ -98,6 +98,11 @@ export default function AdminUserDetailModal({ userId, onClose, onKycChanged }) 
       setDetail(d => ({ ...d, kycStatus: status === 'INFO_REQUESTED' ? 'INFO_REQUESTED' : status, kycRejectionNote: status === 'REJECTED' ? note : d.kycRejectionNote }));
       if (status === 'INFO_REQUESTED') loadClarifications();
       onKycChanged?.(userId, status);
+      // Approving is a terminal action for this screen — close the window
+      // immediately instead of leaving it open showing a now-stale state.
+      // Reject/Request Info stay open since the admin is likely to keep
+      // reviewing (e.g. re-checking documents) after either of those.
+      if (status === 'APPROVED') onClose?.();
     } catch (e) {
       alert(e.message || 'Action failed');
     } finally {
@@ -192,10 +197,12 @@ export default function AdminUserDetailModal({ userId, onClose, onKycChanged }) 
           </Section>
 
           {/* ── Business info (role-specific profile) ── */}
-          {(detail.warehouseProfile || detail.testingAgencyProfile || detail.transportProfile) && (
+          {((detail.warehouseProfiles && detail.warehouseProfiles.length > 0) || detail.testingAgencyProfile || detail.transportProfile) && (
             <Section title="Business Information">
               <div style={{ fontSize: 12, color: T.muted }}>
-                {detail.warehouseProfile && <div>Warehouse: <strong>{detail.warehouseProfile.name}</strong> · {detail.warehouseProfile.city}</div>}
+                {detail.warehouseProfiles?.map(wp => (
+                  <div key={wp.id}>Warehouse: <strong>{wp.name}</strong> · {wp.city}</div>
+                ))}
                 {detail.testingAgencyProfile && <div>Testing Agency: <strong>{detail.testingAgencyProfile.name}</strong></div>}
                 {detail.transportProfile && <div>Transport Provider: <strong>{detail.transportProfile.name}</strong></div>}
               </div>
@@ -267,7 +274,9 @@ export default function AdminUserDetailModal({ userId, onClose, onKycChanged }) 
           {/* ── Actions ── */}
           <Section title="Actions">
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-              <Btn variant="primary" disabled={busy} onClick={() => runAction('APPROVED')}>✅ Approve</Btn>
+              <Btn variant="primary" disabled={busy || detail.kycStatus === 'APPROVED'} onClick={() => runAction('APPROVED')}>
+                {detail.kycStatus === 'APPROVED' ? '✅ Approved' : '✅ Approve'}
+              </Btn>
               <Btn variant="secondary" disabled={busy} onClick={() => {
                 const note = prompt('What additional information is needed?');
                 if (note) runAction('INFO_REQUESTED', note);

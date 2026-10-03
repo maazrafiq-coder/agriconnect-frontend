@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { apiGetReceivedOffers, apiGetOrders, apiAcceptOffer, apiRejectOffer, apiCounterOffer, apiGetMyProducts, apiCreateProduct, apiChangeProductStatus, apiGetCategories, apiGetCities, apiGetUnits } from '../lib/api';
+import { apiGetReceivedOffers, apiGetOrders, apiAcceptOffer, apiRejectOffer, apiCounterOffer, apiGetMyProducts, apiCreateProduct, apiChangeProductStatus, apiDeleteProduct, apiGetCategories, apiGetCities, apiGetUnits } from '../lib/api';
 import { adaptOffers, adaptOrders, adaptProducts } from '../lib/adapters';
 import { useNavigate } from 'react-router-dom';
 import { Card, Btn, Badge, Tabs, Modal, LoadingState, ErrorState, EmptyState, isDemoMode } from '../components/ui';
@@ -222,6 +222,21 @@ export default function SellerDashboard() {
                         setMyListings(prev => prev.map(x => x.id === p.id ? { ...x, status: x.status === 'PAUSED' ? 'ACTIVE' : 'PAUSED' } : x));
                       } catch (e) { alert(e.message || 'Could not update listing status'); }
                     }}>{p.status === 'PAUSED' ? 'Resume' : 'Pause'}</Btn>
+                  )}
+                  {p.status !== 'SOLD' && (
+                    <Btn variant="danger" size="sm" onClick={async () => {
+                      if (!confirm('Delete this listing? This cannot be undone.')) return;
+                      try {
+                        const result = await apiDeleteProduct(p._raw?.id || p.id);
+                        if (result?.archived) {
+                          // Had existing offers — backend archived it (REMOVED)
+                          // instead of a hard delete, to preserve that history.
+                          setMyListings(prev => prev.map(x => x.id === p.id ? { ...x, status: 'REMOVED' } : x));
+                        } else {
+                          setMyListings(prev => prev.filter(x => x.id !== p.id));
+                        }
+                      } catch (e) { alert(e.message || 'Could not delete listing'); }
+                    }}>🗑️ Delete</Btn>
                   )}
                 </div>
               </div>

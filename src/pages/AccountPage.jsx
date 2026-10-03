@@ -113,7 +113,15 @@ const ProfileTab = ({ profile, loading, clarifications, onRespond }) => {
 
       {(profile._count || profile.avgRating != null) && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(120px,1fr))', gap: 10 }}>
-          {profile._count?.productsAsSeller != null && (
+          {/* Warehouse operators list warehouses, not products — counting
+              only products made their profile read "0 listings". */}
+          {profile._count?.warehouseProfiles > 0 && (
+            <Card style={{ padding: 14, textAlign: 'center' }}>
+              <div style={{ fontSize: 20, fontWeight: 900, color: T.green }}>{profile._count.warehouseProfiles}</div>
+              <div style={{ fontSize: 10, color: T.muted, fontWeight: 700 }}>WAREHOUSE LISTINGS</div>
+            </Card>
+          )}
+          {profile._count?.productsAsSeller != null && !(profile._count?.warehouseProfiles > 0 && profile._count.productsAsSeller === 0) && (
             <Card style={{ padding: 14, textAlign: 'center' }}>
               <div style={{ fontSize: 20, fontWeight: 900, color: T.green }}>{profile._count.productsAsSeller}</div>
               <div style={{ fontSize: 10, color: T.muted, fontWeight: 700 }}>LISTINGS</div>

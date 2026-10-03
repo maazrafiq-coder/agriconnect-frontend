@@ -199,7 +199,7 @@ export default function ProductDetailPage() {
             <Stars rating={p.sellerRating} />
             <span style={{ fontSize: 11, color: T.muted, marginLeft: 6 }}>({p.sellerReviews} reviews)</span>
             <div style={{ fontSize: 12, color: T.muted, margin: '8px 0 12px' }}>📍 {p.location}</div>
-            <Btn variant="ghost" style={{ width: '100%', fontSize: 12 }} onClick={() => navigate('/marketplace')}>View All Listings</Btn>
+            <Btn variant="ghost" style={{ width: '100%', fontSize: 12 }} onClick={() => navigate(`/seller/${p.sellerId}`)}>View Seller Profile</Btn>
           </Card>
         </div>
       </div>

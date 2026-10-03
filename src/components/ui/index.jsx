@@ -115,7 +115,12 @@ export const MetricPill = ({ label, val, ok }) => (
   </div>
 );
 
-export const Modal = ({ children, onClose, title, closeOnBackdrop = true, width = 480 }) => (
+// closeOnBackdrop defaults to false: popups (especially in the admin
+// portal) should only close via an explicit action or the ✕ button — an
+// accidental click just outside the box shouldn't discard an in-progress
+// review/form. Pass closeOnBackdrop explicitly where a quick dismiss is
+// genuinely desired (e.g. a purely informational dialog).
+export const Modal = ({ children, onClose, title, closeOnBackdrop = false, width = 480 }) => (
   <div
     style={{
       position: 'fixed', inset: 0,

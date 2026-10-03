@@ -110,6 +110,11 @@ export function adaptWarehouse(w) {
     unit:             'tons',
     // Pricing
     pricePerTon:      Number(w.pricePerTonMonth),
+    // Per-commodity overrides ({ commodity: rate }) — see schema comment on
+    // WarehouseProfile.ratesByCommodity. Falls back to pricePerTon above
+    // for any commodity with no override.
+    ratesByCommodity: w.ratesByCommodity || {},
+    insurancePricePerTonMonth: w.insurancePricePerTonMonth != null ? Number(w.insurancePricePerTonMonth) : null,
     minDuration:      w.minDurationDays,
     // Commodity & features
     commodities:      w.commoditiesAccepted || [],
@@ -198,11 +203,20 @@ export function adaptBooking(b) {
     exitDate:        b.exitDate?.slice(0, 10),
     durationDays:    b.durationDays,
     totalCost:       Number(b.totalCost),
+    insuranceCost:   b.insuranceCost != null ? Number(b.insuranceCost) : null,
+    includeInsurance: !!b.includeInsurance,
+    packagingType:   b.packagingType || '',
+    notes:           b.notes || '',
+    messageCount:    b._count?.messages ?? 0,
     status:          b.status?.toLowerCase(),
     rejectionReason: b.rejectionReason || '',
     cancelReason:    b.cancelReason || '',
     receiptId:       b.receipt?.id || null,
     receiptNumber:   b.receipt?.receiptNumber || null,
+    // Paperwork (NEW_Changes item 10)
+    invoice:         b.invoice || null,
+    grn:             b.goodsReceiptNote || null,
+    gatePass:        b.gateOutPasses?.[0] || null,
     createdAt:       b.createdAt,
     _raw: b,
   };

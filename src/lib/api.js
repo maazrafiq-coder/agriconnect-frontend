@@ -250,6 +250,10 @@ export async function apiGetProduct(id) {
   return apiFetch(`/products/${id}`);
 }
 
+export async function apiGetSellerProfile(sellerId) {
+  return apiFetch(`/products/seller/${sellerId}`);
+}
+
 export async function apiGetMyProducts() {
   return apiFetch('/products/my');
 }
@@ -271,6 +275,10 @@ export async function apiChangeProductStatus(id, status) {
     method: 'PATCH',
     body: JSON.stringify({ status }),
   });
+}
+
+export async function apiDeleteProduct(id) {
+  return apiFetch(`/products/${id}`, { method: 'DELETE' });
 }
 
 // ─── PRODUCT MEDIA (display picture + docs on a marketplace listing) ───────────
@@ -428,18 +436,88 @@ export async function apiBuyInsurance(data) {
   return apiFetch('/warehouse/insurance/buy', { method: 'POST', body: JSON.stringify(data) });
 }
 
-export async function apiGetWarehouseDashboard() {
-  return apiFetch('/warehouse/dashboard/operator');
+export async function apiGetWarehouseDashboard(warehouseId) {
+  return apiFetch(`/warehouse/dashboard/operator${warehouseId ? `?warehouseId=${warehouseId}` : ''}`);
 }
 
 export async function apiRegisterWarehouse(data) {
   return apiFetch('/warehouse/register', { method: 'POST', body: JSON.stringify(data) });
 }
 
+export async function apiUpdateWarehouse(id, data) {
+  return apiFetch(`/warehouse/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+}
+
+export async function apiQuoteWarehouseRate(id, { commodity, quantityTons, durationDays, includeInsurance }) {
+  const qs = new URLSearchParams({
+    commodity: commodity || '',
+    quantityTons: String(quantityTons || 0),
+    durationDays: String(durationDays || 0),
+    includeInsurance: includeInsurance ? 'true' : 'false',
+  }).toString();
+  return apiFetch(`/warehouse/${id}/quote?${qs}`);
+}
+
 export async function apiIssueReceipt(bookingId, { qualityMetrics, actualQuantityTons }) {
   return apiFetch(`/warehouse/receipts/issue/${bookingId}`, {
     method: 'POST',
     body: JSON.stringify({ qualityMetrics, actualQuantityTons }),
+  });
+}
+
+// ─── INVOICE / GRN / GATE-OUT PASS (NEW_Changes item 10) ──────────────────────
+export async function apiGenerateInvoice(bookingId) {
+  return apiFetch(`/warehouse/bookings/${bookingId}/invoice`, { method: 'POST' });
+}
+export async function apiGetInvoice(id) {
+  return apiFetch(`/warehouse/invoices/${id}`);
+}
+export async function apiGetMyInvoices() {
+  return apiFetch('/warehouse/invoices/my');
+}
+export async function apiGetOperatorInvoices() {
+  return apiFetch('/warehouse/invoices/operator');
+}
+export async function apiConfirmInvoicePayment(id, paymentReference) {
+  return apiFetch(`/warehouse/invoices/${id}/confirm-payment`, {
+    method: 'PATCH',
+    body: JSON.stringify({ paymentReference }),
+  });
+}
+export async function apiGetBookingMessages(bookingId) {
+  return apiFetch(`/warehouse/bookings/${bookingId}/messages`);
+}
+export async function apiPostBookingMessage(bookingId, body, kind = 'MESSAGE') {
+  return apiFetch(`/warehouse/bookings/${bookingId}/messages`, {
+    method: 'POST',
+    body: JSON.stringify({ body, kind }),
+  });
+}
+export async function apiGetGrn(id) {
+  return apiFetch(`/warehouse/grn/${id}`);
+}
+export async function apiRequestGateOut(bookingId, { quantityTons, requestNote } = {}) {
+  return apiFetch(`/warehouse/bookings/${bookingId}/gate-out-request`, {
+    method: 'POST',
+    body: JSON.stringify({ quantityTons, requestNote }),
+  });
+}
+export async function apiGetGateOutPass(id) {
+  return apiFetch(`/warehouse/gate-out/${id}`);
+}
+export async function apiGetMyGateOutPasses() {
+  return apiFetch('/warehouse/gate-out/my');
+}
+export async function apiGetOperatorGateOutPasses() {
+  return apiFetch('/warehouse/gate-out/operator');
+}
+export async function apiApproveGateOut(id) {
+  return apiFetch(`/warehouse/gate-out/${id}/approve`, { method: 'PATCH' });
+}
+export async function apiRejectGateOut(id, rejectionNote) {
+  return apiFetch(`/warehouse/gate-out/${id}/reject`, {
+    method: 'PATCH',
+    body: JSON.stringify({ rejectionNote }),
   });
 }
 

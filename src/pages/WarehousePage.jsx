@@ -1,11 +1,12 @@
 import { useState, useMemo } from "react";
 import T from "../theme";
 import { useEffect } from "react";
-import { apiGetWarehouses, apiBookStorage, apiGetMyReceipts, apiApplyLien, apiBuyInsurance, apiGetMyBookings, apiCancelBooking } from "../lib/api";
+import { apiGetWarehouses, apiBookStorage, apiGetMyReceipts, apiApplyLien, apiBuyInsurance, apiGetMyBookings, apiCancelBooking, apiGetInvoice, apiGetGrn, apiGetGateOutPass, apiApproveGateOut, apiRejectGateOut } from "../lib/api";
 import { adaptWarehouses, adaptReceipts, adaptBookings, toBookingRequest } from "../lib/adapters";
 import { STATUS_COLORS } from "../data";
 import { isDemoMode } from "../components/ui";
 import { useAuth } from "../context/AuthContext";
+import BookingThread from "../components/BookingThread";
 
 // Demo/sample data is only ever shown when explicitly enabled — never as a
 // silent substitute for a failed API call. See P0 #10 (misleading mock
@@ -64,8 +65,10 @@ const Card = ({ children, style={}, onClick }) => (
   <div onClick={onClick} style={{background:T.white,borderRadius:12,border:`1px solid ${T.border}`,padding:20,boxShadow:'0 1px 4px rgba(0,0,0,0.04)',...(onClick?{cursor:'pointer'}:{}), ...style}}>{children}</div>
 );
 
+// Closes only via the ✕ button or an explicit in-dialog action — an
+// accidental click on the backdrop should never discard an open form.
 const Modal = ({ children, onClose, title, width=520 }) => (
-  <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:16}} onClick={e=>e.target===e.currentTarget&&onClose()}>
+  <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:16}}>
     <div style={{background:T.white,borderRadius:16,padding:28,maxWidth:width,width:'100%',maxHeight:'92vh',overflowY:'auto',boxShadow:'0 24px 60px rgba(0,0,0,0.35)'}}>
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:22}}>
         <h3 style={{margin:0,fontSize:17,fontWeight:800,color:T.green}}>{title}</h3>
@@ -458,7 +461,18 @@ const BookingModal = ({ warehouse:w, onClose }) => {
   const [error, setError] = useState(null);
   const [bookingReference, setBookingReference] = useState(null);
   const set = (k,v) => setForm(f=>({...f,[k]:v}));
-  const totalCost = form.qty && form.duration ? Math.round(Number(form.qty)*w.pricePerTon*Number(form.duration)/30) : 0;
+  // Resolves the effective rate the same way the backend does (see
+  // WarehouseService.resolveRatePerTonMonth): a per-commodity override if
+  // the operator set one for the selected commodity, else the warehouse's
+  // flat base rate.
+  const effectiveRate = (form.commodity && w.ratesByCommodity?.[form.commodity] != null)
+    ? Number(w.ratesByCommodity[form.commodity]) : w.pricePerTon;
+  const months = form.duration ? Number(form.duration)/30 : 0;
+  const storageCost = form.qty && form.duration ? Math.round(Number(form.qty)*effectiveRate*months) : 0;
+  const insuranceRateKnown = w.insuranceAvailable && w.insurancePricePerTonMonth != null;
+  const insuranceCost = (form.insurance && insuranceRateKnown && form.qty && form.duration)
+    ? Math.round(Number(form.qty)*w.insurancePricePerTonMonth*months) : 0;
+  const totalCost = storageCost + insuranceCost;
 
   if (step===3) return (
     <Modal title="Booking Request Sent" onClose={onClose}>
@@ -534,11 +548,11 @@ const BookingModal = ({ warehouse:w, onClose }) => {
               ))}
             </div>
           </div>
-          {totalCost>0 && (
+          {storageCost>0 && (
             <div style={{background:'#F0FDF4',borderRadius:8,padding:'10px 14px',marginBottom:14}}>
               <div style={{fontSize:11,color:T.muted}}>Estimated Storage Cost</div>
-              <div style={{fontSize:20,fontWeight:900,color:T.green}}>₨{totalCost.toLocaleString()}</div>
-              <div style={{fontSize:11,color:T.muted}}>₨{w.pricePerTon}/ton/month × {form.qty} tons × {Math.round(Number(form.duration)/30*10)/10} months</div>
+              <div style={{fontSize:20,fontWeight:900,color:T.green}}>₨{storageCost.toLocaleString()}</div>
+              <div style={{fontSize:11,color:T.muted}}>₨{effectiveRate}/ton/month × {form.qty} tons × {Math.round(months*10)/10} months</div>
             </div>
           )}
           <Btn variant="primary" style={{width:'100%',padding:'11px'}} disabled={!form.commodity||!form.qty||!form.duration||!form.entryDate} onClick={()=>setStep(2)}>Review Booking →</Btn>
@@ -555,15 +569,23 @@ const BookingModal = ({ warehouse:w, onClose }) => {
             <InfoRow label="Quantity" value={`${form.qty} tons`}/>
             <InfoRow label="Entry Date" value={form.entryDate}/>
             <InfoRow label="Duration" value={`${form.duration} days`}/>
-            <InfoRow label="Storage Rate" value={`₨${w.pricePerTon}/ton/month`}/>
+            <InfoRow label="Storage Rate" value={`₨${effectiveRate}/ton/month`}/>
+            <InfoRow label="Storage Cost" value={`₨${storageCost.toLocaleString()}`}/>
+            {form.insurance && insuranceRateKnown && (
+              <InfoRow label="Insurance Cost" value={`₨${insuranceCost.toLocaleString()}`} accent={T.teal}/>
+            )}
             <InfoRow label="Total Cost" value={`₨${totalCost.toLocaleString()}`} accent={T.gold}/>
           </div>
 
-          <label style={{display:'flex',gap:10,alignItems:'flex-start',padding:'12px',background:T.surface,borderRadius:8,cursor:'pointer',marginBottom:14}}>
-            <input type="checkbox" checked={form.insurance} onChange={e=>set('insurance',e.target.checked)} style={{width:15,height:15,marginTop:1}}/>
+          <label style={{display:'flex',gap:10,alignItems:'flex-start',padding:'12px',background:T.surface,borderRadius:8,cursor:insuranceRateKnown?'pointer':'not-allowed',marginBottom:14,opacity:insuranceRateKnown?1:0.6}}>
+            <input type="checkbox" checked={form.insurance} disabled={!insuranceRateKnown} onChange={e=>set('insurance',e.target.checked)} style={{width:15,height:15,marginTop:1}}/>
             <div>
               <div style={{fontSize:13,fontWeight:700,color:T.green}}>Add Storage Insurance</div>
-              <div style={{fontSize:11,color:T.muted}}>Protect against fire, theft, flood and spoilage. From ₨{Math.round(totalCost*0.008).toLocaleString()}/year</div>
+              {insuranceRateKnown ? (
+                <div style={{fontSize:11,color:T.muted}}>Protect against fire, theft, flood and spoilage. ₨{w.insurancePricePerTonMonth}/ton/month{form.qty && form.duration ? ` — ₨${insuranceCost.toLocaleString()} for this booking` : ''}</div>
+              ) : (
+                <div style={{fontSize:11,color:T.muted}}>This warehouse hasn't set an insurance rate yet, so it isn't available for this booking.</div>
+              )}
             </div>
           </label>
 
@@ -718,6 +740,33 @@ export default function WarehouseModule() {
       });
   };
 
+  // Depositor-side paperwork actions (NEW_Changes item 10). Documents are
+  // private, so a fresh short-lived signed URL is fetched on click.
+  const [threadBooking, setThreadBooking] = useState(null);
+  const [docError, setDocError] = useState('');
+  const [docBusyId, setDocBusyId] = useState(null);
+  const openDoc = async (fetcher, id) => {
+    setDocError('');
+    try {
+      const doc = await fetcher(id);
+      if (doc.downloadUrl) window.open(doc.downloadUrl, '_blank', 'noopener');
+      else setDocError('This document has not been issued yet.');
+    } catch (e) { setDocError(e.message || 'Could not open the document.'); }
+  };
+  const decideGateOut = async (bookingId, passId, approve) => {
+    let note;
+    if (!approve) {
+      note = window.prompt('Reason for rejecting this release (optional):', '');
+      if (note === null) return;
+    } else if (!window.confirm('Approve release of your goods? A Gate Out Pass will be issued.')) return;
+    setDocError(''); setDocBusyId(bookingId);
+    try {
+      if (approve) await apiApproveGateOut(passId); else await apiRejectGateOut(passId, note || undefined);
+      loadBookings();
+    } catch (e) { setDocError(e.message || 'Could not update the gate-out request.'); }
+    finally { setDocBusyId(null); }
+  };
+
   const loadBookings = () => {
     if (!user) { setBookingsState('guest'); setMY_BOOKINGS([]); return; }
     setBookingsState('loading');
@@ -756,7 +805,12 @@ export default function WarehouseModule() {
     if (filter.commodity!=='All') r=r.filter(w=>w.commodities.includes(filter.commodity));
     if (filter.search) r=r.filter(w=>w.name.toLowerCase().includes(filter.search.toLowerCase())||w.city.toLowerCase().includes(filter.search.toLowerCase()));
     return r;
-  }, [filter]);
+  // WAREHOUSES was missing here: warehouses load asynchronously (state
+  // starts as []), and useMemo only recomputes when a *dependency*
+  // changes — not on every render — so the list stayed frozen at "no
+  // results" until something touched `filter` (e.g. pressing "Clear"),
+  // even though the real data had already arrived.
+  }, [filter, WAREHOUSES]);
 
   const stats = [
     ['🏪', 'Total Warehouses', WAREHOUSES.length, T.green],
@@ -897,6 +951,9 @@ export default function WarehouseModule() {
             )}
             {bookingsState==='ready' && MY_BOOKINGS.length>0 && (
               <div style={{display:'grid',gap:10}}>
+                {docError && (
+                  <div style={{background:'#FEF2F2',border:'1px solid #FECACA',borderRadius:8,padding:'10px 12px',fontSize:12,color:'#B91C1C'}}>⚠ {docError}</div>
+                )}
                 {MY_BOOKINGS.map(b=>{
                   const sc = STATUS_COLORS[b.status] || { bg:'#F3F4F6', c:'#6B7280', l:b.status };
                   const canCancel = b.status==='requested' || b.status==='accepted';
@@ -922,10 +979,39 @@ export default function WarehouseModule() {
                       </div>
                       <div style={{display:'flex',gap:8,alignItems:'center'}}>
                         <span style={{fontSize:12,fontWeight:700,color:T.green}}>₨{b.totalCost.toLocaleString()}</span>
+                        <Btn variant="ghost" size="sm" onClick={()=>setThreadBooking(b)}>💬 Messages{b.messageCount ? ` (${b.messageCount})` : ''}</Btn>
                         {canCancel && (
                           <Btn variant="ghost" size="sm" onClick={()=>setCancelBookingTarget(b)}>Cancel</Btn>
                         )}
                       </div>
+
+                      {!['rejected','cancelled'].includes(b.status) && (
+                        <div style={{flexBasis:'100%',borderTop:`1px solid ${T.border}`,paddingTop:10,display:'flex',gap:8,flexWrap:'wrap',alignItems:'center',fontSize:12}}>
+                          {b.invoice && (
+                            <>
+                              <span style={{color:T.muted}}>Invoice {b.invoice.invoiceNumber} (₨{Number(b.invoice.totalAmount).toLocaleString()}):</span>
+                              <span style={{fontWeight:700,color:b.invoice.status==='PAID'?'#15803D':'#B45309'}}>{b.invoice.status==='PAID'?'✓ Paid':'Unpaid'}</span>
+                              <Btn variant="ghost" size="sm" onClick={()=>openDoc(apiGetInvoice,b.invoice.id)}>📄 Invoice PDF</Btn>
+                            </>
+                          )}
+                          {!b.invoice && <span style={{color:T.muted}}>🧾 Invoice: sent by the warehouse after acceptance</span>}
+                          {b.grn
+                            ? <Btn variant="ghost" size="sm" onClick={()=>openDoc(apiGetGrn,b.grn.id)}>📦 GRN {b.grn.grnNumber}</Btn>
+                            : <span style={{color:T.muted}}>📦 GRN: issued when the warehouse receives your goods</span>}
+                          {!b.gatePass && <span style={{color:T.muted}}>🚪 Gate-out pass: issued when you approve a release request</span>}
+                          {b.gatePass?.status==='PENDING' && (
+                            <>
+                              <span style={{color:'#B45309',fontWeight:700}}>🚪 Warehouse requests release of your goods</span>
+                              <Btn variant="primary" size="sm" disabled={docBusyId===b.id} onClick={()=>decideGateOut(b.id,b.gatePass.id,true)}>Approve</Btn>
+                              <Btn variant="ghost" size="sm" disabled={docBusyId===b.id} onClick={()=>decideGateOut(b.id,b.gatePass.id,false)}>Reject</Btn>
+                            </>
+                          )}
+                          {b.gatePass?.status==='APPROVED' && (
+                            <Btn variant="ghost" size="sm" onClick={()=>openDoc(apiGetGateOutPass,b.gatePass.id)}>🚪 Gate Pass {b.gatePass.passNumber}</Btn>
+                          )}
+                          {b.gatePass?.status==='REJECTED' && <span style={{color:T.muted}}>Last release request rejected</span>}
+                        </div>
+                      )}
                     </Card>
                   );
                 })}
@@ -1094,6 +1180,12 @@ export default function WarehouseModule() {
       )}
       {lienReceipt && <BankLienModal receipt={lienReceipt} onClose={()=>setLienReceipt(null)}/>}
       {insureReceipt && <InsuranceModal receipt={insureReceipt} onClose={()=>setInsureReceipt(null)}/>}
+      {threadBooking && (
+        <Modal title={`Messages — ${threadBooking.reference || threadBooking.warehouseName}`} onClose={()=>{setThreadBooking(null); loadBookings();}} width={560}>
+          <div style={{fontSize:12,color:T.muted,marginBottom:10}}>{threadBooking.warehouseName} · {threadBooking.commodity} — {threadBooking.qty} tons</div>
+          <BookingThread bookingId={threadBooking.id} closed={['rejected','cancelled'].includes(threadBooking.status)} />
+        </Modal>
+      )}
       {cancelBookingTarget && (
         <CancelBookingModal
           booking={cancelBookingTarget}
