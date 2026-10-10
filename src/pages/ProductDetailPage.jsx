@@ -1,15 +1,20 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { apiGetProduct, apiSubmitOffer, apiBookTesting } from '../lib/api';
+import { apiGetProduct, apiSubmitOffer, apiBookTesting, apiToggleSaveProduct, apiGetSavedProducts } from '../lib/api';
+import { useAuth } from '../context/AuthContext';
 import { adaptProduct, adaptAgencies, toOfferRequest } from '../lib/adapters';
 import { apiGetAgencies } from '../lib/api';
-import { PRODUCTS as MOCK, AGENCIES as MOCK_AGENCIES } from '../data';
-import { Badge, Btn, Card, Stars, Modal, MetricPill, ErrorState, isDemoMode } from '../components/ui';
+import { Badge, Btn, Card, Stars, Modal, MetricPill, ErrorState, LoadingState } from '../components/ui';
 import T from '../theme';
+import { clickable } from '../lib/a11y';
 
 export default function ProductDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const [saved,   setSaved]   = useState(false);
+  const [saving,  setSaving]  = useState(false);
+  const [saveMsg, setSaveMsg] = useState('');
 
   const [p,           setP]           = useState(null);
   const [agencies,    setAgencies]    = useState([]);
@@ -32,7 +37,7 @@ export default function ProductDetailPage() {
     setLoadError(null);
     Promise.all([
       apiGetProduct(id).then(adaptProduct),
-      apiGetAgencies().then(r => adaptAgencies(r || [])).catch(() => (isDemoMode() ? MOCK_AGENCIES : [])),
+      apiGetAgencies().then(r => adaptAgencies(r || [])).catch(() => []),
     ]).then(([product, agList]) => {
       setP(product);
       setOfferPrice(String(product.price));
@@ -42,20 +47,31 @@ export default function ProductDetailPage() {
       // A real "product not found or API failed" must surface as such —
       // silently substituting an unrelated mock product would show the
       // wrong listing (wrong price, wrong seller) without any indication.
-      if (isDemoMode()) {
-        const mock = MOCK.find(x => String(x.id) === String(id)) || MOCK[0];
-        setP(mock);
-        setOfferPrice(String(mock.price));
-        setOfferQty(String(mock.minOrder));
-        setAgencies(MOCK_AGENCIES);
-      } else {
         setP(null);
         setLoadError(err?.message || 'This product could not be loaded.');
-      }
     }).finally(() => setLoading(false));
   };
 
   useEffect(load, [id]);
+
+  // Is this listing already in the user's Saved list?
+  useEffect(() => {
+    setSaved(false);
+    if (!user) return;
+    apiGetSavedProducts()
+      .then(list => setSaved((list || []).some(s => (s.productId || s.product?.id) === id)))
+      .catch(() => {});
+  }, [id, user]);
+
+  const toggleSave = async () => {
+    if (!user) { navigate('/'); return; }
+    setSaving(true); setSaveMsg('');
+    try {
+      const res = await apiToggleSaveProduct(p._raw?.id || p.id);
+      setSaved(!!res?.saved);
+    } catch (e) { setSaveMsg(e?.message || 'Could not update saved items'); }
+    finally { setSaving(false); }
+  };
 
   const handleOffer = async () => {
     setOfferError('');
@@ -78,9 +94,8 @@ export default function ProductDetailPage() {
   };
 
   if (loading) return (
-    <div style={{ maxWidth: 1100, margin: '0 auto', padding: '60px 20px', textAlign: 'center', color: T.muted }}>
-      <div style={{ fontSize: 40, marginBottom: 16 }}>🌾</div>
-      <p>Loading product…</p>
+    <div style={{ maxWidth: 1100, margin: '0 auto', padding: '60px 20px' }}>
+      <LoadingState label="Loading product…" />
     </div>
   );
 
@@ -107,13 +122,13 @@ export default function ProductDetailPage() {
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: '28px 20px' }}>
       {/* Breadcrumb */}
       <div style={{ fontSize: 13, color: T.muted, marginBottom: 20 }}>
-        <span onClick={() => navigate('/')} style={{ cursor: 'pointer', color: T.green }}>Home</span>
+        <span {...clickable(() => navigate('/'))} style={{ cursor: 'pointer', color: T.green }}>Home</span>
         {' / '}
-        <span onClick={() => navigate('/marketplace')} style={{ cursor: 'pointer', color: T.green }}>Marketplace</span>
+        <span {...clickable(() => navigate('/marketplace'))} style={{ cursor: 'pointer', color: T.green }}>Marketplace</span>
         {' / '}{p.name}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 330px', gap: 22 }}>
+      <div className="ac-split-aside" style={{ display: 'grid', gridTemplateColumns: '1fr 330px', gap: 22 }}>
         {/* ── Left column ── */}
         <div>
           <Card style={{ padding: 0, overflow: 'hidden', marginBottom: 18 }}>
@@ -123,11 +138,14 @@ export default function ProductDetailPage() {
             {p.images?.length > 1 && (
               <div style={{ display: 'flex', gap: 6, padding: '10px 24px 0' }}>
                 {p.images.map((url, i) => (
-                  <div
+                  <button
+                    type="button"
                     key={url}
+                    aria-label={`Show image ${i + 1} of ${p.images.length}`}
+                    aria-pressed={i === activeImage}
                     onClick={() => setActiveImage(i)}
                     style={{
-                      width: 52, height: 52, borderRadius: 8, cursor: 'pointer', flexShrink: 0,
+                      padding: 0, width: 52, height: 52, borderRadius: 8, cursor: 'pointer', flexShrink: 0,
                       background: `url(${url}) center/cover no-repeat`,
                       border: `2px solid ${i === activeImage ? T.gold : 'transparent'}`,
                     }}
@@ -153,7 +171,8 @@ export default function ProductDetailPage() {
           </Card>
 
           <Card style={{ marginBottom: 18 }}>
-            <h2 style={{ margin: '0 0 16px', fontSize: 15, fontWeight: 800, color: T.green }}>📊 Quality Metrics</h2>
+            <h2 style={{ margin: '0 0 4px', fontSize: 15, fontWeight: 800, color: T.green }}>📊 Quality Metrics</h2>
+            <p style={{ margin: '0 0 14px', fontSize: 11, color: T.muted }}>Declared by the seller. Book a lab test for independent verification.</p>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(150px,1fr))', gap: 10 }}>
               {metrics.map(m => <MetricPill key={m.label} {...m} />)}
             </div>
@@ -161,7 +180,7 @@ export default function ProductDetailPage() {
 
           <Card>
             <h2 style={{ margin: '0 0 14px', fontSize: 15, fontWeight: 800, color: T.green }}>📋 Listing Details</h2>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))', gap: 10 }}>
               {[['Harvest Date', p.harvest], ['Available Qty', `${p.qty} ${p.unit}`], ['Minimum Order', `${p.minOrder} ${p.unit}`], ['Location', p.location], ['Category', p.cat?.replace(/_/g,' ')], ['Stage', p.stage]].map(([k, v]) => (
                 <div key={k} style={{ padding: '10px 12px', background: T.surface, borderRadius: 8 }}>
                   <div style={{ fontSize: 10, color: T.muted, fontWeight: 700, marginBottom: 2, letterSpacing: 0.3 }}>{k}</div>
@@ -176,13 +195,19 @@ export default function ProductDetailPage() {
         <div>
           <Card style={{ marginBottom: 14, position: 'sticky', top: 74 }}>
             <div style={{ marginBottom: 18 }}>
-              <div style={{ fontSize: 30, fontWeight: 900, color: T.gold }}>₨{p.price.toLocaleString()}</div>
+              <div style={{ fontSize: 30, fontWeight: 900, color: T.goldText }}>₨{p.price.toLocaleString()}</div>
               <div style={{ fontSize: 12, color: T.muted }}>per {p.unit} · Min. order {p.minOrder} {p.unit}</div>
               {p.qty < 100 && <div style={{ fontSize: 11, color: T.danger, fontWeight: 700, marginTop: 4 }}>⚠ Limited stock</div>}
             </div>
             <Btn variant="primary" style={{ width: '100%', display: 'block', marginBottom: 9, padding: '11px' }} onClick={() => setOfferModal(true)}>💬 Make an Offer</Btn>
             <Btn variant="secondary" style={{ width: '100%', display: 'block', marginBottom: 9 }} onClick={() => setTestModal(true)}>🧪 Request Lab Test</Btn>
-            <Btn variant="ghost" style={{ width: '100%', display: 'block' }} onClick={() => navigate('/transport')}>🚛 Arrange Transport</Btn>
+            <Btn variant="ghost" style={{ width: '100%', display: 'block', marginBottom: 9 }} onClick={() => navigate('/transport')}>🚛 Arrange Transport</Btn>
+            {p.sellerId !== user?.id && (
+              <Btn variant="ghost" style={{ width: '100%', display: 'block' }} disabled={saving} onClick={toggleSave}>
+                {saved ? '❤️ Saved — tap to remove' : '🤍 Save for later'}
+              </Btn>
+            )}
+            {saveMsg && <div style={{ fontSize: 11, color: T.danger, marginTop: 6 }}>{saveMsg}</div>}
             <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${T.border}`, fontSize: 12, color: T.muted }}>📦 {p.qty} {p.unit} in stock</div>
           </Card>
 
@@ -220,19 +245,19 @@ export default function ProductDetailPage() {
                 <div style={{ fontSize: 13, fontWeight: 700, color: T.green }}>{p.name}</div>
                 <div style={{ fontSize: 12, color: T.muted }}>Asking: ₨{p.price.toLocaleString()} / {p.unit}</div>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))', gap: 12, marginBottom: 12 }}>
                 <div>
-                  <label style={{ fontSize: 11, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5 }}>YOUR PRICE (₨)</label>
-                  <input value={offerPrice} onChange={e => setOfferPrice(e.target.value)} type="number" style={inputStyle} />
+                  <label htmlFor="productdetailpage-f1" style={{ fontSize: 11, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5 }}>YOUR PRICE (₨)</label>
+                  <input id="productdetailpage-f1" value={offerPrice} onChange={e => setOfferPrice(e.target.value)} type="number" style={inputStyle} />
                 </div>
                 <div>
-                  <label style={{ fontSize: 11, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5 }}>QUANTITY ({p.unit})</label>
-                  <input value={offerQty} onChange={e => setOfferQty(e.target.value)} type="number" style={inputStyle} />
+                  <label htmlFor="productdetailpage-f2" style={{ fontSize: 11, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5 }}>QUANTITY ({p.unit})</label>
+                  <input id="productdetailpage-f2" value={offerQty} onChange={e => setOfferQty(e.target.value)} type="number" style={inputStyle} />
                 </div>
               </div>
               <div style={{ marginBottom: 16 }}>
-                <label style={{ fontSize: 11, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5 }}>MESSAGE TO SELLER</label>
-                <textarea value={offerMsg} onChange={e => setOfferMsg(e.target.value)} placeholder="Introduce yourself, mention delivery location…" rows={3} style={{ ...inputStyle, resize: 'vertical' }} />
+                <label htmlFor="productdetailpage-f3" style={{ fontSize: 11, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5 }}>MESSAGE TO SELLER</label>
+                <textarea id="productdetailpage-f3" value={offerMsg} onChange={e => setOfferMsg(e.target.value)} placeholder="Introduce yourself, mention delivery location…" rows={3} style={{ ...inputStyle, resize: 'vertical' }} />
               </div>
               {offerPrice && offerQty && (
                 <div style={{ background: '#F0FDF4', borderRadius: 8, padding: '10px 14px', marginBottom: 16 }}>
@@ -252,14 +277,14 @@ export default function ProductDetailPage() {
         <Modal title="Request Lab Testing" onClose={() => setTestModal(false)}>
           <p style={{ color: T.muted, fontSize: 13, marginBottom: 16 }}>Select a certified testing agency to verify this product's quality metrics.</p>
           {agencies.slice(0, 3).map(a => (
-            <div key={a.id} onClick={() => { setTestError(''); setBookAgency(a); }} style={{ border: `2px solid ${T.border}`, borderRadius: 10, padding: 14, marginBottom: 10, cursor: 'pointer' }}>
+            <div key={a.id} {...clickable(() => { setTestError(''); setBookAgency(a); })} style={{ border: `2px solid ${T.border}`, borderRadius: 10, padding: 14, marginBottom: 10, cursor: 'pointer' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div>
                   <div style={{ fontWeight: 700, fontSize: 13, color: T.green }}>{a.name}</div>
                   <div style={{ fontSize: 11, color: T.muted }}>📍{a.city} · ⭐ {a.rating}</div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: 15, fontWeight: 800, color: T.gold }}>₨{a.price.toLocaleString()}</div>
+                  <div style={{ fontSize: 15, fontWeight: 800, color: T.goldText }}>₨{a.price.toLocaleString()}</div>
                   <div style={{ fontSize: 10, color: T.muted }}>{a.turnaround}</div>
                 </div>
               </div>
@@ -275,8 +300,8 @@ export default function ProductDetailPage() {
           <div style={{ marginBottom: 14 }}>
             {(bookAgency.services || []).map(s => <label key={s} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', cursor: 'pointer', fontSize: 13 }}><input type="checkbox" defaultChecked /> {s}</label>)}
           </div>
-          <label style={{ fontSize: 11, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5 }}>PREFERRED DATE</label>
-          <input type="date" style={{ ...inputStyle, marginBottom: 14 }} />
+          <label htmlFor="productdetailpage-f4" style={{ fontSize: 11, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5 }}>PREFERRED DATE</label>
+          <input id="productdetailpage-f4" type="date" style={{ ...inputStyle, marginBottom: 14 }} />
           <div style={{ background: '#F0FDF4', borderRadius: 8, padding: '10px 14px', marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
             <span style={{ fontSize: 12, color: T.muted }}>Estimated fee</span>
             <span style={{ fontSize: 16, fontWeight: 800, color: T.green }}>₨{bookAgency.price.toLocaleString()}</span>

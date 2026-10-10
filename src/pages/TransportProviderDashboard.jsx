@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  apiGetMyProvider, apiRegisterProvider, apiUpdateTracking,
+  apiGetMyProvider, apiRegisterProvider, apiUpdateMyProvider, apiUpdateTracking, apiQuoteTransport, apiDeclineTransportRequest,
   apiGetMyProviderClarifications, apiRespondToClarification,
 } from '../lib/api';
-import { Card, Btn, Badge, Tabs, Modal } from '../components/ui';
+import { Card, Btn, Badge, Modal, LoadingState } from '../components/ui';
 import MediaManagerModal from '../components/MediaManager';
 import ClarificationThread from '../components/ClarificationThread';
 import T from '../theme';
@@ -19,7 +19,7 @@ const VEHICLE_TYPES = [
   ['SMALL_TRUCK', 'Small Truck'], ['MEDIUM_TRUCK', 'Medium Truck'], ['LARGE_TRUCK', 'Large Truck'],
   ['CONTAINER', 'Container'], ['BULK_CARGO', 'Bulk Cargo'], ['REFRIGERATED', 'Refrigerated'],
 ];
-const STATUS_FLOW = ['REQUESTED', 'QUOTED', 'BOOKED', 'PICKED_UP', 'IN_TRANSIT', 'DELIVERED'];
+const STATUS_FLOW = ['BOOKED', 'PICKED_UP', 'IN_TRANSIT', 'DELIVERED'];
 const STATUS_BADGE = {
   REQUESTED: 'gold', QUOTED: 'gold', BOOKED: 'blue', PICKED_UP: 'blue',
   IN_TRANSIT: 'blue', DELIVERED: 'green', CANCELLED: 'red',
@@ -27,8 +27,13 @@ const STATUS_BADGE = {
 const statusLabel = (s) => (s || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 
 // ─── REGISTER FORM ───────────────────────────────────────────────────────────
-function RegisterProviderForm({ onRegistered }) {
-  const [form, setForm] = useState({
+function RegisterProviderForm({ onRegistered, initial, onCancel }) {
+  const editing = !!initial;
+  const [form, setForm] = useState(initial ? {
+    companyName: initial.companyName || '', vehicleTypes: initial.vehicleTypes || [], maxCapacityTons: initial.maxCapacityTons ?? '',
+    coverageProvinces: initial.coverageProvinces || [], pricePerKm: initial.pricePerKm ?? '', hasGps: !!initial.hasGps,
+    hasInsurance: !!initial.hasInsurance, licenseNumber: initial.licenseNumber || '',
+  } : {
     companyName: '', vehicleTypes: [], maxCapacityTons: '', coverageProvinces: ['Punjab'],
     pricePerKm: '', hasGps: false, hasInsurance: false, licenseNumber: '',
   });
@@ -53,11 +58,13 @@ function RegisterProviderForm({ onRegistered }) {
 
     setBusy(true);
     try {
-      await apiRegisterProvider({
+      const payload = {
         ...form,
         maxCapacityTons: Number(form.maxCapacityTons),
         pricePerKm: Number(form.pricePerKm),
-      });
+      };
+      if (editing) { if (!payload.licenseNumber) delete payload.licenseNumber; await apiUpdateMyProvider(payload); }
+      else await apiRegisterProvider(payload);
       onRegistered();
     } catch (err) {
       setError(err.message || 'Could not register your transport service.');
@@ -67,17 +74,17 @@ function RegisterProviderForm({ onRegistered }) {
 
   return (
     <Card style={{ maxWidth: 560, margin: '0 auto' }}>
-      <h3 style={{ margin: '0 0 4px', fontSize: 16, fontWeight: 800, color: T.green }}>List Your Transport Service</h3>
+      <h3 style={{ margin: '0 0 4px', fontSize: 16, fontWeight: 800, color: T.green }}>{editing ? 'Edit Your Listing' : 'List Your Transport Service'}</h3>
       <p style={{ margin: '0 0 20px', fontSize: 12.5, color: T.muted }}>
-        Set up your fleet's listing once — buyers and sellers will be able to book shipments with you.
+        {editing ? 'Changes to your public listing are saved immediately.' : 'Set up your fleet\'s listing once — buyers and sellers can then request quotes from you.'}
       </p>
       <form onSubmit={submit}>
         <div style={{ marginBottom: 12 }}>
-          <label style={labelStyle}>COMPANY NAME</label>
-          <input style={inputStyle} value={form.companyName} onChange={e => set('companyName', e.target.value)} placeholder="e.g. Pak Logistics Express" />
+          <label htmlFor="transportproviderdashboard-f1" style={labelStyle}>COMPANY NAME</label>
+          <input id="transportproviderdashboard-f1" style={inputStyle} value={form.companyName} onChange={e => set('companyName', e.target.value)} placeholder="e.g. Pak Logistics Express" />
         </div>
         <div style={{ marginBottom: 12 }}>
-          <label style={labelStyle}>VEHICLE TYPES</label>
+          <div style={labelStyle}>VEHICLE TYPES</div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {VEHICLE_TYPES.map(([v, l]) => (
               <button type="button" key={v} onClick={() => toggle('vehicleTypes', v)}
@@ -93,7 +100,7 @@ function RegisterProviderForm({ onRegistered }) {
           </div>
         </div>
         <div style={{ marginBottom: 12 }}>
-          <label style={labelStyle}>COVERAGE PROVINCES</label>
+          <div style={labelStyle}>COVERAGE PROVINCES</div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {PROVINCES.map(p => (
               <button type="button" key={p} onClick={() => toggle('coverageProvinces', p)}
@@ -108,19 +115,19 @@ function RegisterProviderForm({ onRegistered }) {
             ))}
           </div>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))', gap: 10, marginBottom: 12 }}>
           <div>
-            <label style={labelStyle}>MAX CAPACITY (TONS)</label>
-            <input type="number" min="0.1" step="0.1" style={inputStyle} value={form.maxCapacityTons} onChange={e => set('maxCapacityTons', e.target.value)} />
+            <label htmlFor="transportproviderdashboard-f2" style={labelStyle}>MAX CAPACITY (TONS)</label>
+            <input id="transportproviderdashboard-f2" type="number" min="0.1" step="0.1" style={inputStyle} value={form.maxCapacityTons} onChange={e => set('maxCapacityTons', e.target.value)} />
           </div>
           <div>
-            <label style={labelStyle}>PRICE / KM (₨)</label>
-            <input type="number" min="0" style={inputStyle} value={form.pricePerKm} onChange={e => set('pricePerKm', e.target.value)} />
+            <label htmlFor="transportproviderdashboard-f3" style={labelStyle}>PRICE / KM (₨)</label>
+            <input id="transportproviderdashboard-f3" type="number" min="0" style={inputStyle} value={form.pricePerKm} onChange={e => set('pricePerKm', e.target.value)} />
           </div>
         </div>
         <div style={{ marginBottom: 12 }}>
-          <label style={labelStyle}>LICENSE NUMBER (OPTIONAL)</label>
-          <input style={inputStyle} value={form.licenseNumber} onChange={e => set('licenseNumber', e.target.value)} />
+          <label htmlFor="transportproviderdashboard-f4" style={labelStyle}>LICENSE NUMBER (OPTIONAL)</label>
+          <input id="transportproviderdashboard-f4" style={inputStyle} value={form.licenseNumber} onChange={e => set('licenseNumber', e.target.value)} />
         </div>
         <div style={{ display: 'flex', gap: 18, marginBottom: 18 }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: T.text, cursor: 'pointer' }}>
@@ -131,7 +138,8 @@ function RegisterProviderForm({ onRegistered }) {
           </label>
         </div>
         {error && <p style={{ color: T.danger, fontSize: 12, marginBottom: 12 }}>{error}</p>}
-        <Btn variant="primary" disabled={busy} style={{ width: '100%' }}>{busy ? 'Registering…' : 'Register Transport Service'}</Btn>
+        <Btn type="submit" variant="primary" disabled={busy} style={{ width: '100%' }}>{busy ? 'Saving…' : editing ? 'Save Changes' : 'Register Transport Service'}</Btn>
+        {editing && <Btn type="button" variant="ghost" onClick={onCancel} style={{ width: '100%', marginTop: 8 }}>Cancel</Btn>}
       </form>
     </Card>
   );
@@ -144,6 +152,7 @@ function UpdateTrackingModal({ request, onClose, onUpdated }) {
   const [currentLocation, setLocation] = useState(request.currentLocation || '');
   const [driverName, setDriverName] = useState(request.driverName || '');
   const [driverPhone, setDriverPhone] = useState(request.driverPhone || '');
+  const [eta, setEta] = useState(request.estimatedArrival ? new Date(request.estimatedArrival).toISOString().slice(0, 16) : '');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -152,6 +161,7 @@ function UpdateTrackingModal({ request, onClose, onUpdated }) {
     setBusy(true);
     try {
       const data = { currentLocation, driverName, driverPhone };
+      if (eta) data.estimatedArrival = new Date(eta).toISOString();
       if (advance && next) data.status = next;
       await apiUpdateTracking(request.id, data);
       onUpdated();
@@ -167,17 +177,21 @@ function UpdateTrackingModal({ request, onClose, onUpdated }) {
         {request.pickupCity} → {request.deliveryCity} · Currently <strong>{statusLabel(request.status)}</strong>
       </p>
       <div style={{ marginBottom: 12 }}>
-        <label style={labelStyle}>CURRENT LOCATION</label>
-        <input style={inputStyle} value={currentLocation} onChange={e => setLocation(e.target.value)} placeholder="e.g. Approaching Gujranwala" />
+        <label htmlFor="transportproviderdashboard-f5" style={labelStyle}>CURRENT LOCATION</label>
+        <input id="transportproviderdashboard-f5" style={inputStyle} value={currentLocation} onChange={e => setLocation(e.target.value)} placeholder="e.g. Approaching Gujranwala" />
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
+      <div style={{ marginBottom: 12 }}>
+        <label htmlFor="transportproviderdashboard-f6" style={labelStyle}>ESTIMATED ARRIVAL</label>
+        <input id="transportproviderdashboard-f6" type="datetime-local" style={inputStyle} value={eta} onChange={e => setEta(e.target.value)} />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))', gap: 10, marginBottom: 16 }}>
         <div>
-          <label style={labelStyle}>DRIVER NAME</label>
-          <input style={inputStyle} value={driverName} onChange={e => setDriverName(e.target.value)} />
+          <label htmlFor="transportproviderdashboard-f7" style={labelStyle}>DRIVER NAME</label>
+          <input id="transportproviderdashboard-f7" style={inputStyle} value={driverName} onChange={e => setDriverName(e.target.value)} />
         </div>
         <div>
-          <label style={labelStyle}>DRIVER PHONE</label>
-          <input style={inputStyle} value={driverPhone} onChange={e => setDriverPhone(e.target.value)} />
+          <label htmlFor="transportproviderdashboard-f8" style={labelStyle}>DRIVER PHONE</label>
+          <input id="transportproviderdashboard-f8" style={inputStyle} value={driverPhone} onChange={e => setDriverPhone(e.target.value)} />
         </div>
       </div>
       {error && <p style={{ color: T.danger, fontSize: 12, marginBottom: 12 }}>{error}</p>}
@@ -195,6 +209,68 @@ function UpdateTrackingModal({ request, onClose, onUpdated }) {
   );
 }
 
+// ─── QUOTE / DECLINE MODAL ───────────────────────────────────────────────────
+function QuoteModal({ request, onClose, onDone }) {
+  const [price, setPrice] = useState(request.quotedPrice ? String(Number(request.quotedPrice)) : '');
+  const [eta, setEta] = useState('');
+  const [note, setNote] = useState(request.quoteNote || '');
+  const [declining, setDeclining] = useState(false);
+  const [reason, setReason] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const send = async () => {
+    setError('');
+    if (!(Number(price) > 0)) return setError('Enter a price greater than zero.');
+    setBusy(true);
+    try {
+      await apiQuoteTransport(request.id, { price, estimatedArrival: eta ? new Date(eta).toISOString() : undefined, note });
+      onDone();
+    } catch (e) { setError(e.message || 'Could not send the quote.'); setBusy(false); }
+  };
+  const decline = async () => {
+    setError('');
+    if (reason.trim().length < 5) return setError('Please give a short reason (at least 5 characters).');
+    setBusy(true);
+    try { await apiDeclineTransportRequest(request.id, reason.trim()); onDone(); }
+    catch (e) { setError(e.message || 'Could not decline.'); setBusy(false); }
+  };
+
+  return (
+    <Modal title={declining ? 'Decline Request' : 'Send a Quote'} onClose={onClose}>
+      <p style={{ fontSize: 12.5, color: T.muted, marginBottom: 14 }}>
+        {request.pickupCity} → {request.deliveryCity}
+        {request.cargoDescription ? ` · ${request.cargoDescription}` : ''}{request.cargoWeightTons ? ` · ${request.cargoWeightTons} t` : ''}
+        {request.requiredDate ? ` · needed ${new Date(request.requiredDate).toLocaleDateString('en-PK')}` : ''}
+      </p>
+      {!declining ? (<>
+        <div style={{ marginBottom: 12 }}>
+          <label htmlFor="transportproviderdashboard-f9" style={labelStyle}>TOTAL PRICE (₨)</label>
+          <input id="transportproviderdashboard-f9" type="number" min="1" style={inputStyle} value={price} onChange={e => setPrice(e.target.value)} />
+        </div>
+        <div style={{ marginBottom: 12 }}>
+          <label htmlFor="transportproviderdashboard-f10" style={labelStyle}>ESTIMATED ARRIVAL (OPTIONAL)</label>
+          <input id="transportproviderdashboard-f10" type="datetime-local" style={inputStyle} value={eta} onChange={e => setEta(e.target.value)} />
+        </div>
+        <div style={{ marginBottom: 14 }}>
+          <label htmlFor="transportproviderdashboard-f11" style={labelStyle}>NOTE TO CUSTOMER (OPTIONAL)</label>
+          <textarea id="transportproviderdashboard-f11" rows={2} style={inputStyle} value={note} onChange={e => setNote(e.target.value)} placeholder="e.g. includes loading, excludes tolls" />
+        </div>
+      </>) : (
+        <div style={{ marginBottom: 14 }}>
+          <label htmlFor="transportproviderdashboard-f12" style={labelStyle}>REASON</label>
+          <textarea id="transportproviderdashboard-f12" rows={3} style={inputStyle} value={reason} onChange={e => setReason(e.target.value)} placeholder="e.g. No vehicle available on those dates" />
+        </div>
+      )}
+      {error && <p style={{ color: T.danger, fontSize: 12, marginBottom: 12 }}>{error}</p>}
+      <div style={{ display: 'flex', gap: 10 }}>
+        <Btn variant="ghost" disabled={busy} style={{ flex: 1 }} onClick={() => { setDeclining(d => !d); setError(''); }}>{declining ? 'Back' : 'Decline'}</Btn>
+        <Btn variant="primary" disabled={busy} style={{ flex: 1 }} onClick={declining ? decline : send}>{busy ? '…' : declining ? 'Decline request' : 'Send quote'}</Btn>
+      </div>
+    </Modal>
+  );
+}
+
 // ─── MAIN DASHBOARD ──────────────────────────────────────────────────────────
 export default function TransportProviderDashboard() {
   const navigate = useNavigate();
@@ -203,6 +279,8 @@ export default function TransportProviderDashboard() {
   const [data, setData] = useState(null);
   const [mediaOpen, setMediaOpen] = useState(false);
   const [trackingRequest, setTrackingRequest] = useState(null);
+  const [quoteRequest, setQuoteRequest] = useState(null);
+  const [editing, setEditing] = useState(false);
   const [clarifications, setClarifications] = useState([]);
 
   const loadClarifications = () => {
@@ -228,7 +306,7 @@ export default function TransportProviderDashboard() {
   useEffect(loadClarifications, []);
 
   if (loading) {
-    return <div style={{ padding: 60, textAlign: 'center', color: T.muted, fontFamily: 'Inter,sans-serif' }}>Loading your transport dashboard…</div>;
+    return <LoadingState label="Loading your transport dashboard…" />;
   }
 
   if (notFound || !data) {
@@ -240,6 +318,14 @@ export default function TransportProviderDashboard() {
   }
 
   const { provider, stats, recentRequests } = data;
+
+  if (editing) {
+    return (
+      <div style={{ fontFamily: 'Inter,system-ui,sans-serif', background: T.bg, minHeight: '100vh', padding: '48px 20px' }}>
+        <RegisterProviderForm initial={provider} onCancel={() => setEditing(false)} onRegistered={() => { setEditing(false); load(); }} />
+      </div>
+    );
+  }
 
   return (
     <div style={{ fontFamily: 'Inter,system-ui,sans-serif', background: T.bg, minHeight: '100vh' }}>
@@ -253,6 +339,7 @@ export default function TransportProviderDashboard() {
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
+            <Btn variant="gold" size="sm" onClick={() => setEditing(true)}>✏️ Edit Listing</Btn>
             <Btn variant="gold" size="sm" onClick={() => setMediaOpen(true)}>📷 Photos & Documents</Btn>
             <Btn variant="secondary" size="sm" style={{ borderColor: 'rgba(255,255,255,0.4)', color: '#fff' }} onClick={() => navigate('/transport')}>View Public Listing</Btn>
           </div>
@@ -276,7 +363,7 @@ export default function TransportProviderDashboard() {
 
         <h3 style={{ fontSize: 14, fontWeight: 800, color: T.green, marginBottom: 12 }}>Shipments</h3>
         {recentRequests.length === 0 ? (
-          <Card><p style={{ fontSize: 13, color: T.muted, margin: 0 }}>No shipments yet — they'll show up here once a customer books your service.</p></Card>
+          <Card><p style={{ fontSize: 13, color: T.muted, margin: 0 }}>No shipments yet — they'll show up here once a customer sends you a request.</p></Card>
         ) : (
           <div style={{ display: 'grid', gap: 10 }}>
             {recentRequests.map(r => (
@@ -284,12 +371,15 @@ export default function TransportProviderDashboard() {
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 700, color: T.text }}>{r.pickupCity} → {r.deliveryCity}</div>
                   <div style={{ fontSize: 11.5, color: T.muted, marginTop: 2 }}>
-                    {r.requester?.profile?.fullName || 'Requester'} · {r.cargoWeightTons ? `${r.cargoWeightTons} tons` : ''} {r.agreedPrice ? `· ₨${Number(r.agreedPrice).toLocaleString()}` : ''}
+                    {r.requester?.profile?.fullName || 'Requester'} · {r.cargoWeightTons ? `${r.cargoWeightTons} tons` : ''} {r.agreedPrice ? `· Agreed ₨${Number(r.agreedPrice).toLocaleString()}` : r.quotedPrice ? `· Quoted ₨${Number(r.quotedPrice).toLocaleString()}` : ''}
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                   <Badge label={statusLabel(r.status)} type={STATUS_BADGE[r.status] || 'gray'} />
-                  {r.status !== 'DELIVERED' && r.status !== 'CANCELLED' && (
+                  {(r.status === 'REQUESTED' || r.status === 'QUOTED') && (
+                    <Btn variant="primary" size="sm" onClick={() => setQuoteRequest(r)}>{r.status === 'QUOTED' ? 'Revise Quote' : 'Send Quote'}</Btn>
+                  )}
+                  {['BOOKED', 'PICKED_UP', 'IN_TRANSIT'].includes(r.status) && (
                     <Btn variant="secondary" size="sm" onClick={() => setTrackingRequest(r)}>Update Tracking</Btn>
                   )}
                 </div>
@@ -318,6 +408,10 @@ export default function TransportProviderDashboard() {
           title="Fleet Photos & Documents"
           onClose={() => setMediaOpen(false)}
         />
+      )}
+
+      {quoteRequest && (
+        <QuoteModal request={quoteRequest} onClose={() => setQuoteRequest(null)} onDone={() => { setQuoteRequest(null); load(); }} />
       )}
 
       {trackingRequest && (

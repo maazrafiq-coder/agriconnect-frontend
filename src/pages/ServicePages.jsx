@@ -2,8 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiGetAgencies, apiBookTesting, apiGetTransporters, apiBookTransport, apiCreateTransportRequest, apiGetMyProducts } from '../lib/api';
 import { adaptAgencies, adaptTransporters, adaptProducts } from '../lib/adapters';
-import { AGENCIES as MOCK_A, TRANSPORTERS as MOCK_T } from '../data';
-import { Card, Btn, Stars, Modal, LoadingState, ErrorState, EmptyState, isDemoMode } from '../components/ui';
+import { Card, Btn, Stars, Modal, LoadingState, ErrorState, EmptyState } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import T from '../theme';
 
@@ -17,6 +16,8 @@ export function TestingPage() {
   const [bookError, setBookError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [product, setProduct]   = useState('');
+  const [chosenServices, setChosenServices] = useState([]);
+  const [scheduledDate, setScheduledDate] = useState('');
   const [search, setSearch]     = useState('');
   const [myProducts, setMyProducts] = useState([]);
   const [myProductsLoaded, setMyProductsLoaded] = useState(false);
@@ -26,8 +27,7 @@ export function TestingPage() {
     apiGetAgencies(search ? { search } : {})
       .then(data => { setAgencies(adaptAgencies(Array.isArray(data) ? data : [])); setLoadState('ready'); })
       .catch(() => {
-        if (isDemoMode()) { setAgencies(MOCK_A); setLoadState('ready'); }
-        else setLoadState('error');
+        setLoadState('error');
       });
   };
 
@@ -49,17 +49,21 @@ export function TestingPage() {
 
   const openBooking = (a) => {
     if (!user) { openLogin(); return; }
-    setSelected(a); setBooked(false); setBookError(''); setProduct('');
+    setSelected(a); setBooked(false); setBookError(''); setProduct(''); setChosenServices(a.services || []); setScheduledDate('');
   };
 
   const handleBook = async () => {
     setBookError('');
+    if (chosenServices.length === 0) { setBookError('Select at least one service.'); return; }
     setSubmitting(true);
     try {
+      const prod = myProducts.find(p => p.name === product);
       await apiBookTesting({
         agencyId: selected.userId || selected.id,
-        servicesRequested: selected.services,
-        notes: product ? `Product: ${product}` : undefined,
+        productId: prod?.id,
+        servicesRequested: chosenServices,
+        scheduledDate: scheduledDate || undefined,
+        notes: product && !prod ? `Product: ${product}` : undefined,
       });
       setBooked(true);
     } catch (e) {
@@ -98,7 +102,7 @@ export function TestingPage() {
               </div>
               <div style={{ display: 'flex', marginBottom: 14 }}>
                 <div style={{ flex: 1, textAlign: 'center', padding: '8px 0' }}>
-                  <div style={{ fontSize: 15, fontWeight: 800, color: T.gold }}>₨{a.price.toLocaleString()}</div>
+                  <div style={{ fontSize: 15, fontWeight: 800, color: T.goldText }}>₨{a.price.toLocaleString()}</div>
                   <div style={{ fontSize: 9, color: T.muted, fontWeight: 600 }}>BASIC PANEL</div>
                 </div>
                 <div style={{ flex: 1, textAlign: 'center', padding: '8px 0', borderLeft: `1px solid ${T.border}` }}>
@@ -131,7 +135,7 @@ export function TestingPage() {
           </div>
           <div style={{ marginBottom: 14 }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: T.muted, marginBottom: 8, letterSpacing: 0.5 }}>SELECT SERVICES</div>
-            {(selected.services || []).map(s => <label key={s} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', cursor: 'pointer', fontSize: 13 }}><input type="checkbox" defaultChecked style={{ width: 14, height: 14 }} /> {s}</label>)}
+            {(selected.services || []).map(s => <label key={s} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', cursor: 'pointer', fontSize: 13 }}><input type="checkbox" checked={chosenServices.includes(s)} onChange={e => setChosenServices(cs => e.target.checked ? [...cs, s] : cs.filter(x => x !== s))} style={{ width: 14, height: 14 }} /> {s}</label>)}
           </div>
           <div style={{ marginBottom: 14 }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: T.muted, marginBottom: 5, letterSpacing: 0.5 }}>PRODUCT TO TEST</div>
@@ -148,10 +152,10 @@ export function TestingPage() {
           </div>
           <div style={{ marginBottom: 14 }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: T.muted, marginBottom: 5, letterSpacing: 0.5 }}>PREFERRED DATE</div>
-            <input type="date" style={{ width: '100%', padding: '9px 12px', border: `1.5px solid ${T.border}`, borderRadius: 7, fontSize: 13, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' }} />
+            <input type="date" value={scheduledDate} min={new Date().toISOString().slice(0, 10)} onChange={e => setScheduledDate(e.target.value)} style={{ width: '100%', padding: '9px 12px', border: `1.5px solid ${T.border}`, borderRadius: 7, fontSize: 13, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' }} />
           </div>
           <div style={{ background: '#F0FDF4', borderRadius: 8, padding: '10px 14px', marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: 12, color: T.muted }}>Estimated fee</span>
+            <span style={{ fontSize: 12, color: T.muted }}>Basic panel fee (indicative — the lab confirms)</span>
             <span style={{ fontSize: 18, fontWeight: 800, color: T.green }}>₨{selected.price.toLocaleString()}</span>
           </div>
           {bookError && (
@@ -161,11 +165,11 @@ export function TestingPage() {
         </Modal>
       )}
       {selected && booked && (
-        <Modal title="Testing Booked!" onClose={() => { setSelected(null); setBooked(false); }}>
+        <Modal title="Request Sent" onClose={() => { setSelected(null); setBooked(false); }}>
           <div style={{ textAlign: 'center', padding: '24px 0' }}>
             <div style={{ fontSize: 52, marginBottom: 14 }}>✅</div>
-            <h3 style={{ color: '#059669', margin: '0 0 10px' }}>Booking Confirmed</h3>
-            <p style={{ color: T.muted, fontSize: 13, margin: '0 0 22px', lineHeight: 1.6 }}>You'll receive an SMS confirmation. The lab report will be digitally attached to your product listing once ready.</p>
+            <h3 style={{ color: '#059669', margin: '0 0 10px' }}>Testing Requested</h3>
+            <p style={{ color: T.muted, fontSize: 13, margin: '0 0 22px', lineHeight: 1.6 }}>The lab has been notified. Track the request and download the report from your dashboard once it's ready.</p>
             <Btn variant="teal" onClick={() => { setSelected(null); setBooked(false); }}>Done</Btn>
           </div>
         </Modal>
@@ -176,6 +180,7 @@ export function TestingPage() {
 
 // ─── TRANSPORT PAGE ───────────────────────────────────────────────────────────
 export function TransportPage() {
+  const navigate = useNavigate();
   const { user, openLogin } = useAuth();
   const [transporters, setTransporters] = useState([]);
   const [loadState, setLoadState]       = useState('loading'); // loading | ready | error
@@ -186,14 +191,15 @@ export function TransportPage() {
   const [from, setFrom]                 = useState('');
   const [to, setTo]                     = useState('');
   const [search, setSearch]             = useState('');
+  const [form, setForm]                 = useState({ pickup: '', delivery: '', vehicleType: '', requiredDate: '', cargo: '', weight: '' });
+  const setF = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }));
 
   const load = () => {
     setLoadState('loading');
     apiGetTransporters(search ? { search } : {})
       .then(data => { setTransporters(adaptTransporters(Array.isArray(data) ? data : [])); setLoadState('ready'); })
       .catch(() => {
-        if (isDemoMode()) { setTransporters(MOCK_T); setLoadState('ready'); }
-        else setLoadState('error');
+        setLoadState('error');
       });
   };
 
@@ -205,20 +211,26 @@ export function TransportPage() {
   const openBooking = (t) => {
     if (!user) { openLogin(); return; }
     setSelected(t); setBooked(false); setBookError('');
+    setForm(f => ({ ...f, pickup: from, delivery: to, vehicleType: t.vehicles?.[0] || '' }));
   };
 
   const handleBook = async () => {
     setBookError('');
     setSubmitting(true);
     try {
+      if (!form.pickup.trim() || !form.delivery.trim()) throw new Error('Enter both pickup and delivery locations.');
+      const city = (v) => v.split(',')[0].trim();
       const req = await apiCreateTransportRequest({
-        pickupLocation: from || 'Pickup location',
-        pickupCity: from?.split(',')[0] || 'Lahore',
-        deliveryLocation: to || 'Delivery location',
-        deliveryCity: to?.split(',')[0] || 'Karachi',
+        pickupLocation: form.pickup.trim(), pickupCity: city(form.pickup),
+        deliveryLocation: form.delivery.trim(), deliveryCity: city(form.delivery),
+        vehicleType: form.vehicleType || undefined,
+        requiredDate: form.requiredDate || undefined,
+        cargoDescription: form.cargo.trim() || undefined,
+        cargoWeightTons: form.weight ? Number(form.weight) : undefined,
       });
       if (!req?.id) throw new Error('Could not create transport request.');
-      await apiBookTransport({ requestId: req.id, providerId: selected.userId || selected.id, agreedPrice: parseFloat(selected.price) || 0 });
+      // Sends the request to this provider for a quote — nothing is booked or priced yet.
+      await apiBookTransport({ requestId: req.id, providerId: selected.userId || selected.id });
       setBooked(true);
     } catch (e) {
       setBookError(e?.message || 'Failed to book transport. Please try again.');
@@ -233,7 +245,7 @@ export function TransportPage() {
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: '28px 20px' }}>
       <div style={{ marginBottom: 24 }}>
         <h1 style={{ margin: 0, fontSize: 22, fontWeight: 900, color: T.green }}>🚛 Transport & Logistics</h1>
-        <p style={{ margin: '5px 0 0', color: T.muted, fontSize: 13 }}>Vetted transport providers with GPS tracking and insurance across all of Pakistan</p>
+        <p style={{ margin: '5px 0 0', color: T.muted, fontSize: 13 }}>Request a quote from a transport provider, accept it, and follow the shipment</p>
         <div style={{ position: 'relative', maxWidth: 340, marginTop: 14 }}>
           <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: T.muted, fontSize: 14 }}>🔍</span>
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search company name…"
@@ -243,15 +255,14 @@ export function TransportPage() {
 
       {/* Route search */}
       <Card style={{ marginBottom: 28, background: T.green, border: 'none', padding: 24 }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: T.mint, marginBottom: 14 }}>Find Transport for Your Route</div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 10, alignItems: 'flex-end' }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: T.mint, marginBottom: 14 }}>Describe Your Route <span style={{ fontWeight: 400, opacity: 0.8 }}>(prefills your quote request)</span></div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 10, alignItems: 'flex-end' }}>
           {[['PICKUP CITY', from, setFrom, 'e.g. Sheikhupura, Punjab'], ['DELIVERY CITY', to, setTo, 'e.g. Karachi, Sindh']].map(([label, val, setter, ph]) => (
             <div key={label}>
-              <label style={{ fontSize: 10, fontWeight: 700, color: T.mint, display: 'block', marginBottom: 5, letterSpacing: 0.5 }}>{label}</label>
-              <input value={val} onChange={e => setter(e.target.value)} placeholder={ph} style={{ ...inputStyle, border: 'none' }} />
+              <label htmlFor="servicepages-f1" style={{ fontSize: 10, fontWeight: 700, color: T.mint, display: 'block', marginBottom: 5, letterSpacing: 0.5 }}>{label}</label>
+              <input id="servicepages-f1" value={val} onChange={e => setter(e.target.value)} placeholder={ph} style={{ ...inputStyle, border: 'none' }} />
             </div>
           ))}
-          <Btn variant="gold">Search Routes</Btn>
         </div>
       </Card>
 
@@ -269,8 +280,8 @@ export function TransportPage() {
                   <Stars rating={t.rating} /><span style={{ fontSize: 11, color: T.muted }}> ({t.reviews})</span>
                 </div>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
-                {[['Rate', t.price, T.text], ['Capacity', t.capacity, T.text], ['GPS', t.gps ? '✓ Available' : '✗ N/A', t.gps ? '#15803D' : T.danger], ['Insurance', t.insurance ? '✓ Covered' : '✗ Not covered', t.insurance ? '#15803D' : T.danger]].map(([k, v, vc]) => (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))', gap: 8, marginBottom: 12 }}>
+                {[['Indicative rate', t.price, T.text], ['Capacity', t.capacity, T.text], ['GPS', t.gps ? '✓ Available' : '✗ N/A', t.gps ? '#15803D' : T.danger], ['Insurance', t.insurance ? '✓ Covered' : '✗ Not covered', t.insurance ? '#15803D' : T.danger]].map(([k, v, vc]) => (
                   <div key={k} style={{ background: T.surface, borderRadius: 7, padding: '8px 10px' }}>
                     <div style={{ fontSize: 9, color: T.muted, fontWeight: 700, letterSpacing: 0.3, marginBottom: 2 }}>{k}</div>
                     <div style={{ fontSize: 12, fontWeight: 700, color: vc }}>{v}</div>
@@ -284,8 +295,8 @@ export function TransportPage() {
                 </div>
               </div>
               <div style={{ marginBottom: 14, fontSize: 12, color: T.muted }}>🗺️ Covers: {(t.provinces || []).join(' · ')}</div>
-              {t.isVerified && <div style={{ fontSize: 11, color: T.teal, fontWeight: 700, marginBottom: 10 }}>✓ Platform Verified</div>}
-              <Btn variant="cyan" style={{ width: '100%' }} onClick={() => openBooking(t)}>Get Quote & Book →</Btn>
+              {t.isVerified && <div style={{ fontSize: 11, color: T.tealText, fontWeight: 700, marginBottom: 10 }}>✓ Platform Verified</div>}
+              <Btn variant="cyan" style={{ width: '100%' }} onClick={() => openBooking(t)}>Request a Quote →</Btn>
             </Card>
           ))}
         </div>
@@ -293,43 +304,42 @@ export function TransportPage() {
 
       {selected && !booked && (
         <Modal title={`Book Transport — ${selected.name}`} onClose={() => { setSelected(null); setBookError(''); }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
-            {[['PICKUP LOCATION', from || 'Sheikhupura, Punjab'], ['DELIVERY LOCATION', to || 'Karachi, Sindh']].map(([l, ph]) => (
-              <div key={l}>
-                <label style={{ fontSize: 11, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5 }}>{l}</label>
-                <input placeholder={ph} style={inputStyle} />
-              </div>
-            ))}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 10, marginBottom: 12 }}>
+            <div><label htmlFor="servicepages-f2" style={{ fontSize: 11, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5 }}>PICKUP LOCATION</label>
+              <input id="servicepages-f2" value={form.pickup} onChange={setF('pickup')} placeholder="e.g. Sheikhupura, Punjab" style={inputStyle} /></div>
+            <div><label htmlFor="servicepages-f3" style={{ fontSize: 11, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5 }}>DELIVERY LOCATION</label>
+              <input id="servicepages-f3" value={form.delivery} onChange={setF('delivery')} placeholder="e.g. Karachi, Sindh" style={inputStyle} /></div>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
-            <div>
-              <label style={{ fontSize: 11, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5 }}>VEHICLE TYPE</label>
-              <select style={{ ...inputStyle }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 10, marginBottom: 12 }}>
+            <div><label htmlFor="servicepages-f4" style={{ fontSize: 11, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5 }}>VEHICLE TYPE</label>
+              <select id="servicepages-f4" value={form.vehicleType} onChange={setF('vehicleType')} style={inputStyle}>
                 {(selected.vehicles || []).map(v => <option key={v}>{v}</option>)}
-              </select>
-            </div>
-            <div>
-              <label style={{ fontSize: 11, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5 }}>REQUIRED DATE</label>
-              <input type="date" style={inputStyle} />
-            </div>
+              </select></div>
+            <div><label htmlFor="servicepages-f5" style={{ fontSize: 11, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5 }}>REQUIRED DATE</label>
+              <input id="servicepages-f5" type="date" value={form.requiredDate} min={new Date().toISOString().slice(0, 10)} onChange={setF('requiredDate')} style={inputStyle} /></div>
           </div>
-          <div style={{ background: '#EFF6FF', borderRadius: 8, padding: '10px 14px', marginBottom: 16 }}>
-            <div style={{ fontSize: 11, color: T.muted, marginBottom: 2 }}>Estimated Rate</div>
-            <div style={{ fontSize: 18, fontWeight: 800, color: '#0891B2' }}>{selected.price}</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 10, marginBottom: 14 }}>
+            <div><label htmlFor="servicepages-f6" style={{ fontSize: 11, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5 }}>CARGO</label>
+              <input id="servicepages-f6" value={form.cargo} onChange={setF('cargo')} placeholder="e.g. Basmati rice, 50kg bags" style={inputStyle} /></div>
+            <div><label htmlFor="servicepages-f7" style={{ fontSize: 11, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5 }}>WEIGHT (TONS)</label>
+              <input id="servicepages-f7" type="number" min="0" step="0.1" value={form.weight} onChange={setF('weight')} style={inputStyle} /></div>
+          </div>
+          <div style={{ background: '#EFF6FF', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 12, color: T.muted, lineHeight: 1.6 }}>
+            No price is fixed yet. {selected.name} will review your request and send a quote (indicative rate: {selected.price}). You decide whether to accept it.
           </div>
           {bookError && (
             <div style={{ background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 8, padding: '10px 12px', marginBottom: 14, fontSize: 12, color: '#B91C1C' }}>⚠ {bookError}</div>
           )}
-          <Btn variant="cyan" style={{ width: '100%', padding: '11px' }} disabled={submitting} onClick={handleBook}>{submitting ? 'Booking…' : 'Confirm Booking →'}</Btn>
+          <Btn variant="cyan" style={{ width: '100%', padding: '11px' }} disabled={submitting} onClick={handleBook}>{submitting ? 'Sending…' : 'Send Quote Request →'}</Btn>
         </Modal>
       )}
       {selected && booked && (
-        <Modal title="Transport Booked!" onClose={() => { setSelected(null); setBooked(false); }}>
+        <Modal title="Quote Requested" onClose={() => { setSelected(null); setBooked(false); }}>
           <div style={{ textAlign: 'center', padding: '24px 0' }}>
             <div style={{ fontSize: 52, marginBottom: 14 }}>🚛</div>
-            <h3 style={{ color: '#0891B2', margin: '0 0 10px' }}>Booking Confirmed</h3>
-            <p style={{ color: T.muted, fontSize: 13, margin: '0 0 22px', lineHeight: 1.6 }}>{selected.name} will confirm pickup details via SMS. You'll receive a tracking link once in transit.</p>
-            <Btn variant="cyan" onClick={() => { setSelected(null); setBooked(false); }}>Done</Btn>
+            <h3 style={{ color: '#0891B2', margin: '0 0 10px' }}>Request Sent</h3>
+            <p style={{ color: T.muted, fontSize: 13, margin: '0 0 22px', lineHeight: 1.6 }}>{selected.name} has been notified and will send you a quote. Review and accept it from the Transport tab of your dashboard, where you can also follow the shipment.</p>
+            <Btn variant="cyan" onClick={() => { setSelected(null); setBooked(false); navigate('/buyer'); }}>View my requests</Btn>
           </div>
         </Modal>
       )}

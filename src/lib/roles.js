@@ -21,14 +21,14 @@ export const OPERATOR_PORTALS = {
 };
 
 export function portalPathForRole(role) {
-  if (role === 'admin') return '/admin';
+  if (role === 'admin' || role === 'moderator') return '/admin';
   if (SELLER_ROLES.includes(role)) return '/seller';
   if (OPERATOR_PORTALS[role]) return OPERATOR_PORTALS[role].path;
   return '/buyer';
 }
 
 export function portalIconForRole(role) {
-  if (role === 'admin') return '🔐';
+  if (role === 'admin' || role === 'moderator') return '🔐';
   if (SELLER_ROLES.includes(role)) return '📦';
   if (OPERATOR_PORTALS[role]) return OPERATOR_PORTALS[role].icon;
   return '🛒';

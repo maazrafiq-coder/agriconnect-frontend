@@ -145,6 +145,7 @@ export function adaptReceipt(r) {
   if (!r) return null;
   return {
     id:            r.id,
+    number:        r.receiptNumber || '',
     warehouseName: r.warehouse?.name || '',
     warehouseCity: r.warehouse?.city || '',
     commodity:     r.commodity,
@@ -159,7 +160,11 @@ export function adaptReceipt(r) {
     quality:       r.qualityMetrics || {},
     lien:          r.lien
       ? {
+          id:          r.lien.id,
           bank:        r.lien.bankName,
+          loanRefNo:   r.lien.loanRefNo || '',
+          decisionNote: r.lien.decisionNote || '',
+          interestRate: r.lien.interestRate != null ? Number(r.lien.interestRate) : null,
           amount:      Number(r.lien.loanAmount),
           placed:      r.lien.placedAt?.slice(0, 10),
           officer:     r.lien.loanOfficer || '',
@@ -208,6 +213,11 @@ export function adaptBooking(b) {
     packagingType:   b.packagingType || '',
     notes:           b.notes || '',
     messageCount:    b._count?.messages ?? 0,
+    // Bank lien (or pending loan application) on the stored goods. While set,
+    // the warehouse cannot release the goods (gate-out is blocked).
+    lien:            b.receipt?.lien && ['ACTIVE', 'PENDING'].includes(b.receipt.lien.status)
+      ? { id: b.receipt.lien.id, status: b.receipt.lien.status.toLowerCase(), bank: b.receipt.lien.bankName, amount: Number(b.receipt.lien.loanAmount), placed: b.receipt.lien.placedAt?.slice(0, 10) }
+      : null,
     status:          b.status?.toLowerCase(),
     rejectionReason: b.rejectionReason || '',
     cancelReason:    b.cancelReason || '',
@@ -415,6 +425,9 @@ export function adaptTestingRequest(t) {
     status:     t.status?.toLowerCase(),
     report:     !!t.reportUrl,
     reportUrl:  t.reportUrl || null,
+    hasReportFile: !!t.reportFileKey,
+    reportFileName: t.reportFileName || '',
+    requester:  t.requester?.profile?.fullName || '',
     fee:        Number(t.fee || 0),
     date:       t.scheduledDate?.slice(0, 10) || t.createdAt?.slice(0, 10) || '',
     _raw: t,
@@ -433,4 +446,37 @@ function timeAgo(dateStr) {
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `${hrs}h ago`;
   return `${Math.floor(hrs / 24)}d ago`;
+}
+
+// ─── TRANSPORT REQUEST ADAPTER (R3·M5) ───────────────────────────────────────
+const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('en-PK', { day: 'numeric', month: 'short', year: 'numeric' }) : '');
+const fmtDateTime = (d) => (d ? new Date(d).toLocaleString('en-PK', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '');
+export function adaptTransportRequest(r) {
+  if (!r) return null;
+  return {
+    id:           r.id,
+    status:       r.status,
+    from:         r.pickupCity || r.pickupLocation || '',
+    to:           r.deliveryCity || r.deliveryLocation || '',
+    pickupLocation: r.pickupLocation, deliveryLocation: r.deliveryLocation,
+    cargo:        r.cargoDescription || '',
+    weight:       r.cargoWeightTons != null ? Number(r.cargoWeightTons) : null,
+    vehicleType:  r.vehicleType || '',
+    requiredDate: fmtDate(r.requiredDate),
+    provider:     r.provider?.companyName || r.provider?.user?.profile?.fullName || '',
+    requester:    r.requester?.profile?.fullName || '',
+    quotedPrice:  r.quotedPrice != null ? Number(r.quotedPrice) : null,
+    agreedPrice:  r.agreedPrice != null ? Number(r.agreedPrice) : null,
+    quoteNote:    r.quoteNote || '',
+    // "ETA: undefined" fix — only ever render a real date, otherwise empty
+    eta:          fmtDateTime(r.estimatedArrival),
+    currentLocation: r.currentLocation || '',
+    driverName:   r.driverName || '', driverPhone: r.driverPhone || '',
+    pickedUpAt:   fmtDateTime(r.pickedUpAt), deliveredAt: fmtDateTime(r.deliveredAt),
+    created:      fmtDate(r.createdAt),
+    _raw: r,
+  };
+}
+export function adaptTransportRequests(list = []) {
+  return list.map(adaptTransportRequest);
 }

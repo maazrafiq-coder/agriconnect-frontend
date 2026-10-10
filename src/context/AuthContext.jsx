@@ -1,8 +1,8 @@
 import { createContext, useContext, useState, useEffect } from 'react';
-import { apiGetMe, apiLogin, apiLogout, clearTokens, setAccessToken } from '../lib/api';
+import { apiGetMe, apiLogin, apiLogout, setAccessToken } from '../lib/api';
 import { adaptUser } from '../lib/adapters';
 
-const BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1';
+import { API_BASE as BASE } from '../lib/config';
 
 const AuthContext = createContext(null);
 
@@ -54,11 +54,12 @@ export function AuthProvider({ children }) {
 
   const openLogin    = () => setAuthModal('login');
   const openRegister = () => setAuthModal('register');
+  const openForgot   = () => setAuthModal('forgot');
   const closeModal   = () => setAuthModal(null);
 
   return (
     <AuthContext.Provider
-      value={{ user, loading, login, loginWithUser, logout, authModal, openLogin, openRegister, closeModal }}
+      value={{ user, loading, login, loginWithUser, logout, authModal, openLogin, openRegister, openForgot, closeModal }}
     >
       {children}
     </AuthContext.Provider>

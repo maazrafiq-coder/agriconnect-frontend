@@ -5,11 +5,14 @@
 // actual submitted documents before approving or rejecting someone —
 // exactly the gap this component closes.
 import { useState, useEffect } from 'react';
-import { Modal, Btn } from '../ui';
+import { Modal, Btn, LoadingState } from '../ui';
 import {
   apiAdminGetUserDetail, apiAdminUpdateKyc, apiGetKycDocumentSignedUrl, resolveApiFileUrl,
   apiGetClarifications, apiRespondToClarification, apiResolveClarification,
+  apiModeratorRecommend, apiRequestClarification,
 } from '../../lib/api';
+import { useAuth } from '../../context/AuthContext';
+import TextPromptModal from '../ui/TextPromptModal';
 import ClarificationThread from '../ClarificationThread';
 import T from '../../theme';
 
@@ -43,7 +46,7 @@ function Section({ title, children }) {
 function ActivityTable({ rows, columns, empty }) {
   if (!rows?.length) return <div style={{ fontSize: 12, color: T.muted, fontStyle: 'italic' }}>{empty}</div>;
   return (
-    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+    <div style={{ overflowX: 'auto' }}><table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
       <tbody>
         {rows.map(r => (
           <tr key={r.id} style={{ borderBottom: `1px solid ${T.border}` }}>
@@ -51,15 +54,18 @@ function ActivityTable({ rows, columns, empty }) {
           </tr>
         ))}
       </tbody>
-    </table>
+    </table></div>
   );
 }
 
 export default function AdminUserDetailModal({ userId, onClose, onKycChanged }) {
+  const { user: viewer } = useAuth();
+  const isModerator = viewer?.role === 'moderator'; // may recommend / ask for info, not decide
   const [detail, setDetail] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [clarifications, setClarifications] = useState([]);
+  const [ask, setAsk] = useState(null);
 
   const loadClarifications = () => {
     apiGetClarifications('USER_KYC', userId)
@@ -127,7 +133,7 @@ export default function AdminUserDetailModal({ userId, onClose, onKycChanged }) 
   return (
     <Modal title="Complete Profile" onClose={onClose} width={720}>
       {error && <div style={{ color: T.danger, fontSize: 13 }}>⚠ {error}</div>}
-      {!detail && !error && <div style={{ padding: 30, textAlign: 'center', color: T.muted }}>Loading…</div>}
+      {!detail && !error && <LoadingState />}
       {detail && (
         <div>
           {/* ── Header ── */}
@@ -170,7 +176,7 @@ export default function AdminUserDetailModal({ userId, onClose, onKycChanged }) 
 
           {/* ── Identity / Contact ── */}
           <Section title="Identity & Contact">
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, fontSize: 12 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))', gap: 8, fontSize: 12 }}>
               <div>Phone: <strong>{detail.phoneNumber || '—'}</strong> {detail.isPhoneVerified ? '✓' : ''}</div>
               <div>Email: <strong>{detail.email || '—'}</strong> {detail.isEmailVerified ? '✓' : ''}</div>
               <div>CNIC: <strong>{detail.profile?.cnicNumber || '—'}</strong></div>
@@ -273,22 +279,41 @@ export default function AdminUserDetailModal({ userId, onClose, onKycChanged }) 
 
           {/* ── Actions ── */}
           <Section title="Actions">
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+            {isModerator ? (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 8 }}>
+                <Btn variant="primary" disabled={busy || detail.kycStatus !== 'SUBMITTED'} onClick={async () => {
+                  setBusy(true);
+                  try {
+                    await apiModeratorRecommend(userId);
+                    setDetail(d => ({ ...d, kycStatus: 'RECOMMENDED' }));
+                    onKycChanged?.(userId, 'RECOMMENDED');
+                  } catch (e) { alert(e.message || 'Action failed'); } finally { setBusy(false); }
+                }}>{detail.kycStatus === 'RECOMMENDED' ? '👍 Recommended' : '👍 Recommend for approval'}</Btn>
+                <Btn variant="secondary" disabled={busy} onClick={() => setAsk({
+                  title: 'Request more information', label: 'What additional information is needed?', submitLabel: 'Send request',
+                  onSubmit: async (note) => { await apiRequestClarification('USER_KYC', userId, note); loadClarifications(); },
+                })}>❓ Request Info</Btn>
+                <div style={{ fontSize: 11, color: T.muted, alignSelf: 'center' }}>Final approval or rejection is made by an administrator.</div>
+              </div>
+            ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 8 }}>
               <Btn variant="primary" disabled={busy || detail.kycStatus === 'APPROVED'} onClick={() => runAction('APPROVED')}>
                 {detail.kycStatus === 'APPROVED' ? '✅ Approved' : '✅ Approve'}
               </Btn>
-              <Btn variant="secondary" disabled={busy} onClick={() => {
-                const note = prompt('What additional information is needed?');
-                if (note) runAction('INFO_REQUESTED', note);
-              }}>❓ Request Info</Btn>
-              <Btn variant="danger" disabled={busy} onClick={() => {
-                const note = prompt('Reason for rejection:');
-                if (note) runAction('REJECTED', note);
-              }}>❌ Reject</Btn>
+              <Btn variant="secondary" disabled={busy} onClick={() => setAsk({
+                title: 'Request more information', label: 'What additional information is needed?', submitLabel: 'Send request',
+                onSubmit: (note) => runAction('INFO_REQUESTED', note),
+              })}>❓ Request Info</Btn>
+              <Btn variant="danger" disabled={busy} onClick={() => setAsk({
+                title: 'Reject KYC', label: 'Reason for rejection (shown to the user)', submitLabel: 'Reject',
+                onSubmit: (note) => runAction('REJECTED', note),
+              })}>❌ Reject</Btn>
             </div>
+            )}
           </Section>
         </div>
       )}
+      {ask && <TextPromptModal {...ask} onClose={() => setAsk(null)} />}
     </Modal>
   );
 }
