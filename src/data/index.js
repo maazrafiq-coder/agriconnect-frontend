@@ -39,4 +39,6 @@ export const STATUS_COLORS = {
   countered:  { bg:'#FEF3C7', c:'#B45309',  l:'Countered'  },
   cancelled:  { bg:'#F3F4F6', c:'#6B7280',  l:'Cancelled'  },
   disputed:   { bg:'#FEE2E2', c:'#B91C1C',  l:'Disputed'   },
+  expired:    { bg:'#F3F4F6', c:'#6B7280',  l:'Expired'    },
+  withdrawn:  { bg:'#F3F4F6', c:'#6B7280',  l:'Withdrawn'  },
 };

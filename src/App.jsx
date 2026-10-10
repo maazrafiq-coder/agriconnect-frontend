@@ -1,34 +1,35 @@
+import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Navbar from './components/Navbar';
 import ErrorBoundary from './components/ErrorBoundary';
-import { LoginModal, RegisterModal } from './components/auth/AuthModals';
+import { LoadingState } from './components/ui';
+import HomePage from './pages/HomePage';
 
-import HomePage         from './pages/HomePage';
-import MarketplacePage  from './pages/MarketplacePage';
-import ProductDetailPage from './pages/ProductDetailPage';
-import SellerProfilePage from './pages/SellerProfilePage';
-import { TestingPage, TransportPage } from './pages/ServicePages';
-import WarehousePage from './pages/WarehousePage';
-import SellerDashboard  from './pages/SellerDashboard';
-import BuyerDashboard   from './pages/BuyerDashboard';
-import AdminDashboard   from './pages/AdminDashboard';
-import AccountPage      from './pages/AccountPage';
-import WarehouseOperatorDashboard from './pages/WarehouseOperatorDashboard';
-import TestingAgencyDashboard     from './pages/TestingAgencyDashboard';
-import TransportProviderDashboard from './pages/TransportProviderDashboard';
-import { SELLER_ROLES } from './lib/roles';
-
-// Protected route wrapper
-function ProtectedRoute({ children, requireSeller, requireAdmin, requireRole }) {
-  const { user, loading } = useAuth();
-  if (loading) return null; // wait for session rehydration before deciding
-  if (!user) return <Navigate to="/" replace />;
-  if (requireAdmin && user.role !== 'admin') return <Navigate to="/" replace />;
-  if (requireSeller && !SELLER_ROLES.includes(user.role)) return <Navigate to="/" replace />;
-  if (requireRole && user.role !== requireRole) return <Navigate to="/" replace />;
-  return children;
-}
+// Route-level code splitting: every page except Home is its own chunk.
+const named = (loader, name) => lazy(() => loader().then(m => ({ default: m[name] })));
+const LoginModal = named(() => import('./components/auth/AuthModals'), 'LoginModal');
+const RegisterModal = named(() => import('./components/auth/AuthModals'), 'RegisterModal');
+const ForgotPasswordModal = named(() => import('./components/auth/AuthModals'), 'ForgotPasswordModal');
+const MarketplacePage  = lazy(() => import('./pages/MarketplacePage'));
+const ProductDetailPage = lazy(() => import('./pages/ProductDetailPage'));
+const SellerProfilePage = lazy(() => import('./pages/SellerProfilePage'));
+const TestingPage   = named(() => import('./pages/ServicePages'), 'TestingPage');
+const TransportPage = named(() => import('./pages/ServicePages'), 'TransportPage');
+const WarehousePage = lazy(() => import('./pages/WarehousePage'));
+const SellerDashboard = lazy(() => import('./pages/SellerDashboard'));
+const BuyerDashboard  = lazy(() => import('./pages/BuyerDashboard'));
+const AdminDashboard  = lazy(() => import('./pages/AdminDashboard'));
+const AccountPage     = lazy(() => import('./pages/AccountPage'));
+const WarehouseOperatorDashboard = lazy(() => import('./pages/WarehouseOperatorDashboard'));
+const TestingAgencyDashboard     = lazy(() => import('./pages/TestingAgencyDashboard'));
+const TransportProviderDashboard = lazy(() => import('./pages/TransportProviderDashboard'));
+const TrackingPage = lazy(() => import('./pages/TrackingPage'));
+const HelpPage     = named(() => import('./pages/InfoPages'), 'HelpPage');
+const DisputesPage = named(() => import('./pages/InfoPages'), 'DisputesPage');
+const ContactPage  = named(() => import('./pages/InfoPages'), 'ContactPage');
+const TermsPage    = named(() => import('./pages/InfoPages'), 'TermsPage');
+import ProtectedRoute from './components/ProtectedRoute';
 
 // Inner app — needs auth context available
 function AppInner() {
@@ -36,6 +37,7 @@ function AppInner() {
   return (
     <>
       <Navbar />
+      <Suspense fallback={<LoadingState />}>
       <Routes>
         <Route path="/"            element={<HomePage />} />
         <Route path="/marketplace" element={<MarketplacePage />} />
@@ -51,12 +53,21 @@ function AppInner() {
         <Route path="/warehouse-portal" element={<ProtectedRoute requireRole="warehouse"><WarehouseOperatorDashboard /></ProtectedRoute>} />
         <Route path="/testing-portal"   element={<ProtectedRoute requireRole="testing_agency"><TestingAgencyDashboard /></ProtectedRoute>} />
         <Route path="/transport-portal" element={<ProtectedRoute requireRole="transporter"><TransportProviderDashboard /></ProtectedRoute>} />
+        <Route path="/help"        element={<HelpPage />} />
+        <Route path="/disputes"    element={<DisputesPage />} />
+        <Route path="/contact"     element={<ContactPage />} />
+        <Route path="/terms"       element={<TermsPage />} />
+        <Route path="/track/:id"   element={<TrackingPage />} />
         <Route path="*"            element={<Navigate to="/" replace />} />
       </Routes>
+      </Suspense>
 
       {/* Global auth modals */}
-      {authModal === 'login'    && <LoginModal />}
-      {authModal === 'register' && <RegisterModal />}
+      <Suspense fallback={null}>
+        {authModal === 'login'    && <LoginModal />}
+        {authModal === 'register' && <RegisterModal />}
+        {authModal === 'forgot'   && <ForgotPasswordModal />}
+      </Suspense>
     </>
   );
 }

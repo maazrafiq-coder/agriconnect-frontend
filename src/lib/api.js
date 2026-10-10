@@ -12,7 +12,7 @@
  * gap that localStorage-based storage has.
  */
 
-const BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1';
+import { API_BASE as BASE } from './config';
 
 // Uploaded files (product photos, KYC docs, listing media, etc.) are stored
 // with paths relative to the API's origin (e.g. "/uploads/products/x.jpg"),
@@ -55,10 +55,20 @@ export const setTokens = (access) => setAccessToken(access);
 // never persisted, lost on reload by design (a reload mid-registration just
 // means re-verifying OTP, which is an acceptable tradeoff for not persisting
 // a bearer token in storage).
-let registrationToken = null;
-export const getRegistrationToken = () => registrationToken;
-export const setRegistrationToken = (token) => { registrationToken = token; };
-export const clearRegistrationToken = () => { registrationToken = null; };
+//
+// Round 3 M4: the token (2h, scoped to document upload only) is now ALSO kept
+// in sessionStorage so a refresh during the "upload documents" step doesn't
+// strand the person. sessionStorage is per-tab and cleared when the tab
+// closes; storage can be unavailable, so every access is guarded.
+const REG_KEY = 'agri_reg_token';
+const readStored = () => { try { return sessionStorage.getItem(REG_KEY); } catch { return null; } };
+let registrationToken = readStored();
+export const getRegistrationToken = () => registrationToken || (registrationToken = readStored());
+export const setRegistrationToken = (token) => {
+  registrationToken = token;
+  try { token ? sessionStorage.setItem(REG_KEY, token) : sessionStorage.removeItem(REG_KEY); } catch { /* ignore */ }
+};
+export const clearRegistrationToken = () => setRegistrationToken(null);
 
 // ─── CORE FETCH ───────────────────────────────────────────────────────────────
 async function apiFetch(path, options = {}) {
@@ -106,7 +116,20 @@ async function apiFetch(path, options = {}) {
   return data;
 }
 
-async function tryRefresh() {
+// Single-flight: when several requests 401 at once (dashboards fire many in
+// parallel when the access token expires) they must share ONE refresh call.
+// The refresh token rotates on every use, so a second parallel call would
+// present the already-used token, fail, and wrongly sign the user out.
+let refreshInFlight = null;
+
+function tryRefresh() {
+  if (!refreshInFlight) {
+    refreshInFlight = doRefresh().finally(() => { refreshInFlight = null; });
+  }
+  return refreshInFlight;
+}
+
+async function doRefresh() {
   try {
     const res = await fetch(`${BASE}/auth/refresh`, {
       method: 'POST',
@@ -129,6 +152,10 @@ export async function apiRegister({ phoneNumber, email, password, role, fullName
     method: 'POST',
     body: JSON.stringify({ phoneNumber: phoneNumber || undefined, email: email || undefined, password, role, fullName }),
   });
+}
+
+export async function apiResendOtp(identifier) {
+  return apiFetch('/auth/resend-otp', { method: 'POST', body: JSON.stringify({ identifier }) });
 }
 
 export async function apiVerifyOtp({ identifier, otp, purpose = 'phone_verify' }) {
@@ -317,6 +344,13 @@ export async function apiGetReceivedOffers() {
   return apiFetch('/offers/received');
 }
 
+export async function apiGetOfferMessages(offerId) {
+  return apiFetch(`/offers/${offerId}/messages`);
+}
+export async function apiPostOfferMessage(offerId, body) {
+  return apiFetch(`/offers/${offerId}/messages`, { method: 'POST', body: JSON.stringify({ body }) });
+}
+
 export async function apiGetSentOffers() {
   return apiFetch('/offers/sent');
 }
@@ -330,6 +364,16 @@ export async function apiRejectOffer(offerId, reason) {
     method: 'PATCH',
     body: JSON.stringify({ reason }),
   });
+}
+
+// Buyer side of a negotiation: accept the seller's counter (order is created
+// at the counter price) or withdraw an open offer / decline a counter.
+export async function apiAcceptCounter(offerId) {
+  return apiFetch(`/offers/${offerId}/accept-counter`, { method: 'PATCH' });
+}
+
+export async function apiWithdrawOffer(offerId) {
+  return apiFetch(`/offers/${offerId}/withdraw`, { method: 'PATCH' });
 }
 
 export async function apiCounterOffer(offerId, { counterPrice, counterMessage }) {
@@ -430,6 +474,58 @@ export async function apiReleaseLien(lienId, note) {
     method: 'PATCH',
     body: JSON.stringify({ note }),
   });
+}
+
+export async function apiWithdrawLien(lienId) {
+  return apiFetch(`/warehouse/lien/${lienId}/withdraw`, { method: 'PATCH' });
+}
+
+// Admin / moderator: loan-application queue
+export async function apiAdminGetLiens(status) {
+  return apiFetch(`/warehouse/admin/liens${status ? `?status=${status}` : ''}`);
+}
+export async function apiAdminConfirmLien(lienId, data) {
+  return apiFetch(`/warehouse/admin/liens/${lienId}/confirm`, { method: 'PATCH', body: JSON.stringify(data) });
+}
+export async function apiAdminRejectLien(lienId, note) {
+  return apiFetch(`/warehouse/admin/liens/${lienId}/reject`, { method: 'PATCH', body: JSON.stringify({ note }) });
+}
+
+// Admin: platform settings (fee + commodity price table) and order totals
+export async function apiAdminGetSettings() {
+  return apiFetch('/settings/admin');
+}
+export async function apiAdminSetPlatformFee(platformFeePct) {
+  return apiFetch('/settings/admin/platform-fee', { method: 'PUT', body: JSON.stringify({ platformFeePct }) });
+}
+export async function apiAdminSetCommodityPrice(commodity, pricePerTon) {
+  return apiFetch('/settings/admin/commodity-prices', { method: 'PUT', body: JSON.stringify({ commodity, pricePerTon }) });
+}
+export async function apiAdminDeleteCommodityPrice(commodity) {
+  return apiFetch(`/settings/admin/commodity-prices/${encodeURIComponent(commodity)}`, { method: 'DELETE' });
+}
+export async function apiAdminGetOrderSummary() {
+  return apiFetch('/orders/admin/summary');
+}
+
+// ─── NOTIFICATIONS ──────────────────────────────────────────────────────────
+export async function apiGetNotifications(limit = 30) {
+  return apiFetch(`/notifications?limit=${limit}`);
+}
+export async function apiGetUnreadNotificationCount() {
+  return apiFetch('/notifications/unread-count');
+}
+export async function apiMarkNotificationRead(id) {
+  return apiFetch(`/notifications/${id}/read`, { method: 'PATCH' });
+}
+export async function apiMarkAllNotificationsRead() {
+  return apiFetch('/notifications/read-all', { method: 'PATCH' });
+}
+
+// ─── ADMIN: COMPLETE LISTING DETAIL ─────────────────────────────────────────
+// type: warehouse | testing_agency | transport | product
+export async function apiAdminGetListingDetail(type, id) {
+  return apiFetch(`/admin-review/${type}/${id}`);
 }
 
 export async function apiBuyInsurance(data) {
@@ -899,7 +995,6 @@ export async function apiGetListingMedia(entityType, entityId) {
 
 export async function apiUploadListingMedia(entityType, entityId, files, type = 'image') {
   const token = getToken();
-  const BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1';
   const formData = new FormData();
   files.forEach((f) => formData.append('files', f));
   const res = await fetch(`${BASE}/media/${entityType}/${entityId}?type=${type}`, {
@@ -923,4 +1018,52 @@ export async function apiDeleteListingMedia(mediaId) {
 
 export async function apiSetProductMediaPrimary(mediaId) {
   return apiFetch(`/products/media/${mediaId}/set-primary`, { method: 'PATCH' });
+}
+
+// ─── ROUND 3 · M5 ──────────────────────────────────────────────────────────────
+export async function apiGetPublicStats() {
+  return apiFetch('/public/stats');
+}
+
+// Transport: quote → accept flow
+export async function apiQuoteTransport(requestId, { price, estimatedArrival, note }) {
+  return apiFetch(`/transport/requests/${requestId}/quote`, { method: 'PATCH', body: JSON.stringify({ price: Number(price), estimatedArrival: estimatedArrival || undefined, note: note || undefined }) });
+}
+export async function apiAcceptTransportQuote(requestId) {
+  return apiFetch(`/transport/requests/${requestId}/accept`, { method: 'PATCH' });
+}
+export async function apiDeclineTransportRequest(requestId, reason) {
+  return apiFetch(`/transport/requests/${requestId}/decline`, { method: 'PATCH', body: JSON.stringify({ reason }) });
+}
+export async function apiCancelTransportRequest(requestId) {
+  return apiFetch(`/transport/requests/${requestId}/cancel`, { method: 'PATCH' });
+}
+
+// Lab report file (permanent storage; a fresh signed link is minted per download)
+export async function apiUploadTestingReportFile(requestId, file) {
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await fetch(`${BASE}/testing/requests/${requestId}/report-file`, {
+    method: 'POST',
+    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+    credentials: 'include',
+    body: formData,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error?.message || (Array.isArray(data?.message) ? data.message[0] : data?.message) || `Upload failed (${res.status})`);
+  return data;
+}
+export async function apiGetTestingReportFile(requestId) {
+  return apiFetch(`/testing/requests/${requestId}/report-file`);
+}
+
+// Insurance: server-priced quote
+export async function apiGetInsuranceQuote(receiptId) {
+  return apiFetch(`/warehouse/insurance/quote/${receiptId}`);
+}
+
+// Admin audit trail
+export async function apiAdminGetAuditLog(params = {}) {
+  const qs = new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v))).toString();
+  return apiFetch(`/audit/admin${qs ? `?${qs}` : ''}`);
 }

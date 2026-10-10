@@ -8,6 +8,10 @@ export default function ProductCard({ product: p }) {
   return (
     <div
       onClick={() => navigate(`/product/${p.id}`)}
+      role="link"
+      tabIndex={0}
+      aria-label={`${p.name}, ${p.location}`}
+      onKeyDown={e => { if (e.key === 'Enter') navigate(`/product/${p.id}`); }}
       style={{
         background: T.white, borderRadius: 12,
         border: `1px solid ${T.border}`, overflow: 'hidden',
@@ -33,15 +37,22 @@ export default function ProductCard({ product: p }) {
         <div style={{ fontSize: 11, color: T.muted, marginBottom: 8 }}>{p.stage} · 📍 {p.location.split(',')[0]}</div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
           <div>
-            <span style={{ fontSize: 17, fontWeight: 800, color: T.gold }}>₨{p.price.toLocaleString()}</span>
+            <span style={{ fontSize: 17, fontWeight: 800, color: T.goldText }}>₨{p.price.toLocaleString()}</span>
             <span style={{ fontSize: 11, color: T.muted }}>/{p.unit}</span>
           </div>
           <span style={{ fontSize: 11, color: T.muted }}>{p.qty} avail.</span>
         </div>
         <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: 10 }}>
-          <span style={{ fontSize: 10, background: '#F0FDF4', color: '#15803D', padding: '2px 7px', borderRadius: 10 }}>💧{p.metrics.moisture}%</span>
-          <span style={{ fontSize: 10, background: '#FEF3C7', color: '#B45309', padding: '2px 7px', borderRadius: 10 }}>📏{p.metrics.length}mm</span>
-          <span style={{ fontSize: 10, background: '#DBEAFE', color: '#1D4ED8', padding: '2px 7px', borderRadius: 10 }}>💔{p.metrics.broken}%</span>
+          {[
+            ['💧', p.metrics?.moisture, '%', '#F0FDF4', '#15803D'],
+            ['📏', p.metrics?.length, 'mm', '#FEF3C7', '#B45309'],
+            ['💔', p.metrics?.broken, '%', '#DBEAFE', '#1D4ED8'],
+          ].map(([icon, v, unit, bg, fg]) => v != null && (
+            <span key={icon} style={{ fontSize: 10, background: bg, color: fg, padding: '2px 7px', borderRadius: 10 }}>{icon}{v}{unit}</span>
+          ))}
+          {p.metrics?.moisture == null && p.metrics?.length == null && p.metrics?.broken == null && (
+            <span style={{ fontSize: 10, background: '#F3F4F6', color: T.muted, padding: '2px 7px', borderRadius: 10 }}>Quality details not provided</span>
+          )}
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span style={{ fontSize: 11, fontWeight: p.sellerVerified ? 700 : 400, color: p.sellerVerified ? T.mid : T.muted }}>

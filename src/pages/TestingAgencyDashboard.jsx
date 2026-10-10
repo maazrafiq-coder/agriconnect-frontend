@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  apiGetMyAgency, apiRegisterAgency, apiUpdateTestingStatus, apiSubmitTestingReport,
+  apiGetMyAgency, apiRegisterAgency, apiUpdateMyAgency, apiUpdateTestingStatus, apiSubmitTestingReport, apiUploadTestingReportFile,
   apiGetMyProviderClarifications, apiRespondToClarification,
 } from '../lib/api';
-import { Card, Btn, Badge, Tabs, Modal } from '../components/ui';
+import { Card, Btn, Badge, Modal, LoadingState } from '../components/ui';
 import MediaManagerModal from '../components/MediaManager';
 import ClarificationThread from '../components/ClarificationThread';
 import T from '../theme';
@@ -28,8 +28,13 @@ const STATUS_BADGE = {
 const statusLabel = (s) => (s || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 
 // ─── REGISTER FORM ───────────────────────────────────────────────────────────
-function RegisterAgencyForm({ onRegistered }) {
-  const [form, setForm] = useState({
+function RegisterAgencyForm({ onRegistered, initial, onCancel }) {
+  const editing = !!initial;
+  const [form, setForm] = useState(initial ? {
+    name: initial.name || '', city: initial.city || '', province: initial.province || 'Punjab', services: initial.services || [],
+    basePrice: initial.basePrice ?? '', turnaroundHours: String(initial.turnaroundHours ?? '48'),
+    accreditations: (initial.accreditations || []).join(', '), coverageAreas: (initial.coverageAreas || []).join(', '),
+  } : {
     name: '', city: '', province: 'Punjab', services: [],
     basePrice: '', turnaroundHours: '48', accreditations: '', coverageAreas: '',
   });
@@ -53,7 +58,8 @@ function RegisterAgencyForm({ onRegistered }) {
 
     setBusy(true);
     try {
-      await apiRegisterAgency({
+      const save = editing ? apiUpdateMyAgency : apiRegisterAgency;
+      await save({
         name: form.name, city: form.city, province: form.province, services: form.services,
         basePrice: Number(form.basePrice), turnaroundHours: Number(form.turnaroundHours),
         accreditations: form.accreditations.split(',').map(s => s.trim()).filter(Boolean),
@@ -74,23 +80,23 @@ function RegisterAgencyForm({ onRegistered }) {
       </p>
       <form onSubmit={submit}>
         <div style={{ marginBottom: 12 }}>
-          <label style={labelStyle}>LAB / AGENCY NAME</label>
-          <input style={inputStyle} value={form.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Punjab Food Authority Lab" />
+          <label htmlFor="testingagencydashboard-f1" style={labelStyle}>LAB / AGENCY NAME</label>
+          <input id="testingagencydashboard-f1" style={inputStyle} value={form.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Punjab Food Authority Lab" />
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))', gap: 10, marginBottom: 12 }}>
           <div>
-            <label style={labelStyle}>CITY</label>
-            <input style={inputStyle} value={form.city} onChange={e => set('city', e.target.value)} placeholder="e.g. Lahore" />
+            <label htmlFor="testingagencydashboard-f2" style={labelStyle}>CITY</label>
+            <input id="testingagencydashboard-f2" style={inputStyle} value={form.city} onChange={e => set('city', e.target.value)} placeholder="e.g. Lahore" />
           </div>
           <div>
-            <label style={labelStyle}>PROVINCE</label>
-            <select style={inputStyle} value={form.province} onChange={e => set('province', e.target.value)}>
+            <label htmlFor="testingagencydashboard-f3" style={labelStyle}>PROVINCE</label>
+            <select id="testingagencydashboard-f3" style={inputStyle} value={form.province} onChange={e => set('province', e.target.value)}>
               {PROVINCES.map(p => <option key={p}>{p}</option>)}
             </select>
           </div>
         </div>
         <div style={{ marginBottom: 12 }}>
-          <label style={labelStyle}>SERVICES OFFERED</label>
+          <div style={labelStyle}>SERVICES OFFERED</div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {SERVICES.map(s => (
               <button type="button" key={s} onClick={() => toggleService(s)}
@@ -105,26 +111,27 @@ function RegisterAgencyForm({ onRegistered }) {
             ))}
           </div>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))', gap: 10, marginBottom: 12 }}>
           <div>
-            <label style={labelStyle}>BASE PRICE (₨)</label>
-            <input type="number" min="0" style={inputStyle} value={form.basePrice} onChange={e => set('basePrice', e.target.value)} />
+            <label htmlFor="testingagencydashboard-f4" style={labelStyle}>BASE PRICE (₨)</label>
+            <input id="testingagencydashboard-f4" type="number" min="0" style={inputStyle} value={form.basePrice} onChange={e => set('basePrice', e.target.value)} />
           </div>
           <div>
-            <label style={labelStyle}>TURNAROUND (HOURS)</label>
-            <input type="number" min="1" style={inputStyle} value={form.turnaroundHours} onChange={e => set('turnaroundHours', e.target.value)} />
+            <label htmlFor="testingagencydashboard-f5" style={labelStyle}>TURNAROUND (HOURS)</label>
+            <input id="testingagencydashboard-f5" type="number" min="1" style={inputStyle} value={form.turnaroundHours} onChange={e => set('turnaroundHours', e.target.value)} />
           </div>
         </div>
         <div style={{ marginBottom: 12 }}>
-          <label style={labelStyle}>ACCREDITATIONS (COMMA-SEPARATED, OPTIONAL)</label>
-          <input style={inputStyle} value={form.accreditations} onChange={e => set('accreditations', e.target.value)} placeholder="ISO 17025, PNAC Accredited" />
+          <label htmlFor="testingagencydashboard-f6" style={labelStyle}>ACCREDITATIONS (COMMA-SEPARATED, OPTIONAL)</label>
+          <input id="testingagencydashboard-f6" style={inputStyle} value={form.accreditations} onChange={e => set('accreditations', e.target.value)} placeholder="ISO 17025, PNAC Accredited" />
         </div>
         <div style={{ marginBottom: 18 }}>
-          <label style={labelStyle}>COVERAGE AREAS (COMMA-SEPARATED, OPTIONAL)</label>
-          <input style={inputStyle} value={form.coverageAreas} onChange={e => set('coverageAreas', e.target.value)} placeholder="Lahore, Sheikhupura, Gujranwala" />
+          <label htmlFor="testingagencydashboard-f7" style={labelStyle}>COVERAGE AREAS (COMMA-SEPARATED, OPTIONAL)</label>
+          <input id="testingagencydashboard-f7" style={inputStyle} value={form.coverageAreas} onChange={e => set('coverageAreas', e.target.value)} placeholder="Lahore, Sheikhupura, Gujranwala" />
         </div>
         {error && <p style={{ color: T.danger, fontSize: 12, marginBottom: 12 }}>{error}</p>}
-        <Btn variant="primary" disabled={busy} style={{ width: '100%' }}>{busy ? 'Registering…' : 'Register Lab'}</Btn>
+        <Btn type="submit" variant="primary" disabled={busy} style={{ width: '100%' }}>{busy ? 'Saving…' : editing ? 'Save Changes' : 'Register Lab'}</Btn>
+        {editing && <Btn type="button" variant="ghost" onClick={onCancel} style={{ width: '100%', marginTop: 8 }}>Cancel</Btn>}
       </form>
     </Card>
   );
@@ -132,17 +139,26 @@ function RegisterAgencyForm({ onRegistered }) {
 
 // ─── SUBMIT REPORT MODAL ─────────────────────────────────────────────────────
 function SubmitReportModal({ request, onClose, onSubmitted }) {
+  const [file, setFile] = useState(null);
   const [reportUrl, setReportUrl] = useState('');
   const [notes, setNotes] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const alreadyUploaded = !!request.reportFileKey;
 
   const submit = async () => {
     setError('');
-    if (!reportUrl) return setError('Provide a link to the report file.');
+    if (!file && !alreadyUploaded && !reportUrl.trim() && !notes.trim()) {
+      return setError('Attach the report file (PDF, JPG or PNG), or enter a link or result notes.');
+    }
     setBusy(true);
     try {
-      await apiSubmitTestingReport(request.id, { reportUrl, reportData: notes ? { notes } : undefined });
+      // The file is stored permanently; the requester gets a fresh download link each time.
+      if (file) await apiUploadTestingReportFile(request.id, file);
+      await apiSubmitTestingReport(request.id, {
+        reportUrl: reportUrl.trim() || undefined,
+        reportData: notes ? { notes } : undefined,
+      });
       onSubmitted();
     } catch (err) {
       setError(err.message || 'Could not submit report.');
@@ -156,15 +172,17 @@ function SubmitReportModal({ request, onClose, onSubmitted }) {
         {request.servicesRequested?.join(', ')} for {request.requester?.profile?.fullName || 'requester'}
       </p>
       <div style={{ marginBottom: 12 }}>
-        <label style={labelStyle}>REPORT FILE URL</label>
-        <input style={inputStyle} value={reportUrl} onChange={e => setReportUrl(e.target.value)} placeholder="https://…" />
-        <p style={{ fontSize: 10.5, color: T.muted, marginTop: 4 }}>
-          Upload the report as a document under "Photos & Documents" first, then paste its link here.
-        </p>
+        <label htmlFor="testingagencydashboard-f8" style={labelStyle}>REPORT FILE (PDF, JPG OR PNG, MAX 10 MB)</label>
+        <input id="testingagencydashboard-f8" type="file" accept="application/pdf,image/jpeg,image/png" onChange={e => setFile(e.target.files?.[0] || null)} style={{ fontSize: 12 }} />
+        {alreadyUploaded && !file && <p style={{ fontSize: 11, color: '#15803D', marginTop: 4 }}>✓ A file ({request.reportFileName || 'report'}) is already attached. Choose another to replace it.</p>}
+      </div>
+      <div style={{ marginBottom: 12 }}>
+        <label htmlFor="testingagencydashboard-f9" style={labelStyle}>OR A LINK TO THE REPORT (OPTIONAL)</label>
+        <input id="testingagencydashboard-f9" style={inputStyle} value={reportUrl} onChange={e => setReportUrl(e.target.value)} placeholder="https://…" />
       </div>
       <div style={{ marginBottom: 16 }}>
-        <label style={labelStyle}>NOTES (OPTIONAL)</label>
-        <textarea style={{ ...inputStyle, minHeight: 60, resize: 'vertical' }} value={notes} onChange={e => setNotes(e.target.value)} />
+        <label htmlFor="testingagencydashboard-f10" style={labelStyle}>NOTES / RESULTS (OPTIONAL)</label>
+        <textarea id="testingagencydashboard-f10" style={{ ...inputStyle, minHeight: 60, resize: 'vertical' }} value={notes} onChange={e => setNotes(e.target.value)} />
       </div>
       {error && <p style={{ color: T.danger, fontSize: 12, marginBottom: 12 }}>{error}</p>}
       <div style={{ display: 'flex', gap: 10 }}>
@@ -183,6 +201,7 @@ export default function TestingAgencyDashboard() {
   const [data, setData] = useState(null);
   const [mediaOpen, setMediaOpen] = useState(false);
   const [reportRequest, setReportRequest] = useState(null);
+  const [editing, setEditing] = useState(false);
   const [busyId, setBusyId] = useState(null);
   const [clarifications, setClarifications] = useState([]);
 
@@ -223,7 +242,7 @@ export default function TestingAgencyDashboard() {
   };
 
   if (loading) {
-    return <div style={{ padding: 60, textAlign: 'center', color: T.muted, fontFamily: 'Inter,sans-serif' }}>Loading your lab dashboard…</div>;
+    return <LoadingState label="Loading your lab dashboard…" />;
   }
 
   if (notFound || !data) {
@@ -235,6 +254,14 @@ export default function TestingAgencyDashboard() {
   }
 
   const { agency, stats, recentRequests } = data;
+
+  if (editing) {
+    return (
+      <div style={{ fontFamily: 'Inter,system-ui,sans-serif', background: T.bg, minHeight: '100vh', padding: '48px 20px' }}>
+        <RegisterAgencyForm initial={agency} onCancel={() => setEditing(false)} onRegistered={() => { setEditing(false); load(); }} />
+      </div>
+    );
+  }
 
   return (
     <div style={{ fontFamily: 'Inter,system-ui,sans-serif', background: T.bg, minHeight: '100vh' }}>
@@ -248,6 +275,7 @@ export default function TestingAgencyDashboard() {
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
+            <Btn variant="gold" size="sm" onClick={() => setEditing(true)}>✏️ Edit Listing</Btn>
             <Btn variant="gold" size="sm" onClick={() => setMediaOpen(true)}>📷 Photos & Documents</Btn>
             <Btn variant="secondary" size="sm" style={{ borderColor: 'rgba(255,255,255,0.4)', color: '#fff' }} onClick={() => navigate('/testing')}>View Public Listing</Btn>
           </div>

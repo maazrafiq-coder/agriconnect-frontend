@@ -12,6 +12,17 @@
     <style>
       *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
       body { font-family: 'Inter', system-ui, -apple-system, sans-serif; background: #F5F0E8; color: #111827; }
+      /* Visible keyboard focus everywhere (many controls set outline:none inline). */
+      :focus-visible { outline: 2px solid #2563EB !important; outline-offset: 2px; }
+      @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; } }
+      /* Narrow-screen fallbacks for the few fixed-column layouts (inline styles need !important). */
+      @media (max-width: 860px) { .ac-split-aside { grid-template-columns: 1fr !important; } }
+      @media (max-width: 700px) {
+        .ac-split { grid-template-columns: 1fr !important; }
+        .ac-admin-sidebar { width: 100% !important; padding: 10px 0 !important; }
+      }
+      @media (max-width: 640px) { .ac-filter-grid { grid-template-columns: 1fr 1fr !important; } }
+      @media (max-width: 520px) { .ac-grid-4 { grid-template-columns: 1fr 1fr !important; } .ac-filter-grid { grid-template-columns: 1fr !important; } }
       ::-webkit-scrollbar { width: 6px; height: 6px; }
       ::-webkit-scrollbar-track { background: #F5F0E8; }
       ::-webkit-scrollbar-thumb { background: #B7A05A; border-radius: 3px; }

@@ -1,16 +1,17 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import ProductCard from '../components/ProductCard';
-import { Card, ErrorState, isDemoMode } from '../components/ui';
+import { Card, ErrorState } from '../components/ui';
 import { apiGetProducts, apiGetCategories, apiGetCities } from '../lib/api';
 import { adaptProducts } from '../lib/adapters';
-import { PRODUCTS as MOCK } from '../data';
 import T from '../theme';
+import { clickable } from '../lib/a11y';
 
 export default function MarketplacePage() {
   const [searchParams] = useSearchParams();
+  const PAGE_SIZE = 20;
   const [search,       setSearch]       = useState(searchParams.get('q') || '');
-  const [cat,          setCat]          = useState('All');
+  const [cat,          setCat]          = useState(searchParams.get('category') || 'All');
   const [province,     setProvince]     = useState('All');
   const [city,         setCity]         = useState('All');
   const [cities,       setCities]       = useState([]);
@@ -20,6 +21,8 @@ export default function MarketplacePage() {
   const [verifiedOnly, setVerifiedOnly] = useState(false);
   const [products,     setProducts]     = useState([]);
   const [total,        setTotal]        = useState(0);
+  const [page,         setPage]         = useState(1);
+  const [loadingMore,  setLoadingMore]  = useState(false);
   const [categories,   setCategories]   = useState([
     { slug: 'rice', name: 'Rice' }, { slug: 'paddy', name: 'Paddy' }, { slug: 'wheat', name: 'Wheat' },
     { slug: 'maize', name: 'Maize' }, { slug: 'pulses', name: 'Pulses' }, { slug: 'oil-seeds', name: 'Oil Seeds' },
@@ -38,10 +41,7 @@ export default function MarketplacePage() {
   const [error,        setError]        = useState(null);
 
   // Fetch from API whenever filters change
-  const fetchProducts = () => {
-    setLoading(true);
-    setError(null);
-    const params = {
+  const buildParams = (pg) => ({
       ...(search       && { search }),
       ...(cat !== 'All'      && { category: cat }),
       ...(province !== 'All' && { province }),
@@ -50,8 +50,23 @@ export default function MarketplacePage() {
       ...(maxPrice           && { maxPrice: Number(maxPrice) }),
       ...(verifiedOnly       && { verifiedOnly: true }),
       ...(sortBy !== 'featured' && { sortBy }),
-      limit: 20,
-    };
+      page: pg, limit: PAGE_SIZE,
+  });
+
+  const loadMore = () => {
+    const next = page + 1;
+    setLoadingMore(true);
+    apiGetProducts(buildParams(next))
+      .then(res => { setProducts(prev => [...prev, ...adaptProducts(res.data || [])]); setPage(next); })
+      .catch(e => setError(e?.message || 'Could not load more products.'))
+      .finally(() => setLoadingMore(false));
+  };
+
+  const fetchProducts = () => {
+    setLoading(true);
+    setError(null);
+    setPage(1);
+    const params = buildParams(1);
 
     apiGetProducts(params)
       .then(res => {
@@ -59,25 +74,9 @@ export default function MarketplacePage() {
         setTotal(res.meta?.total ?? 0);
       })
       .catch(e => {
-        if (isDemoMode()) {
-          // Demo mode only: filter locally bundled sample data instead of
-          // the live API. Never used as a silent fallback in production.
-          let r = [...MOCK];
-          if (search)      r = r.filter(p => [p.name, p.variety, p.seller, p.location].some(s => s?.toLowerCase().includes(search.toLowerCase())));
-          if (cat !== 'All')      r = r.filter(p => p.cat === cat);
-          if (province !== 'All') r = r.filter(p => p.location?.includes(province));
-          if (maxPrice)    r = r.filter(p => p.price <= Number(maxPrice));
-          if (verifiedOnly) r = r.filter(p => p.sellerVerified);
-          if (sortBy === 'price_asc')  r.sort((a, b) => a.price - b.price);
-          if (sortBy === 'price_desc') r.sort((a, b) => b.price - a.price);
-          if (sortBy === 'rating')     r.sort((a, b) => b.sellerRating - a.sellerRating);
-          setProducts(r);
-          setTotal(r.length);
-        } else {
           setProducts([]);
           setTotal(0);
           setError(e?.message || 'Could not load products from the server.');
-        }
       })
       .finally(() => setLoading(false));
   };
@@ -109,47 +108,47 @@ export default function MarketplacePage() {
             <div style={{ fontSize: 13, fontWeight: 800, color: T.green, marginBottom: 14 }}>🔽 Filters</div>
 
             <div style={{ marginBottom: 13 }}>
-              <label style={{ fontSize: 10, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5, letterSpacing: 0.5 }}>SEARCH</label>
-              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Variety, seller, category…" style={inputStyle} />
+              <label htmlFor="marketplacepage-f1" style={{ fontSize: 10, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5, letterSpacing: 0.5 }}>SEARCH</label>
+              <input id="marketplacepage-f1" value={search} onChange={e => setSearch(e.target.value)} placeholder="Variety, seller, category…" style={inputStyle} />
             </div>
 
             <div style={{ marginBottom: 13 }}>
-              <label style={{ fontSize: 10, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 6, letterSpacing: 0.5 }}>CATEGORY</label>
-              <div onClick={() => setCat('All')} style={{ padding: '6px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: cat === 'All' ? 700 : 400, color: cat === 'All' ? T.green : T.text, background: cat === 'All' ? '#F0FDF4' : 'transparent', marginBottom: 1 }}>All Categories</div>
+              <div style={{ fontSize: 10, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 6, letterSpacing: 0.5 }}>CATEGORY</div>
+              <div {...clickable(() => setCat('All'))} style={{ padding: '6px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: cat === 'All' ? 700 : 400, color: cat === 'All' ? T.green : T.text, background: cat === 'All' ? '#F0FDF4' : 'transparent', marginBottom: 1 }}>All Categories</div>
               {categories.map(c => (
-                <div key={c.slug} onClick={() => setCat(c.slug)} style={{ padding: '6px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: cat === c.slug ? 700 : 400, color: cat === c.slug ? T.green : T.text, background: cat === c.slug ? '#F0FDF4' : 'transparent', marginBottom: 1 }}>
+                <div key={c.slug} {...clickable(() => setCat(c.slug))} style={{ padding: '6px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: cat === c.slug ? 700 : 400, color: cat === c.slug ? T.green : T.text, background: cat === c.slug ? '#F0FDF4' : 'transparent', marginBottom: 1 }}>
                   {c.icon ? `${c.icon} ` : ''}{c.name}
                 </div>
               ))}
             </div>
 
             <div style={{ marginBottom: 13 }}>
-              <label style={{ fontSize: 10, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 6, letterSpacing: 0.5 }}>STAGE</label>
+              <div style={{ fontSize: 10, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 6, letterSpacing: 0.5 }}>STAGE</div>
               {['All', 'PADDY', 'BROWN_RICE', 'MILLED_WHITE', 'WHITE_RICE'].map(s => (
-                <div key={s} onClick={() => setStage(s)} style={{ padding: '6px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: stage === s ? 700 : 400, color: stage === s ? T.green : T.text, background: stage === s ? '#F0FDF4' : 'transparent', marginBottom: 1 }}>
+                <div key={s} {...clickable(() => setStage(s))} style={{ padding: '6px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: stage === s ? 700 : 400, color: stage === s ? T.green : T.text, background: stage === s ? '#F0FDF4' : 'transparent', marginBottom: 1 }}>
                   {s === 'All' ? 'All Stages' : s.replace(/_/g, ' ')}
                 </div>
               ))}
             </div>
 
             <div style={{ marginBottom: 13 }}>
-              <label style={{ fontSize: 10, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5, letterSpacing: 0.5 }}>PROVINCE</label>
-              <select value={province} onChange={e => setProvince(e.target.value)} style={{ ...inputStyle, padding: '8px 10px' }}>
+              <label htmlFor="marketplacepage-f2" style={{ fontSize: 10, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5, letterSpacing: 0.5 }}>PROVINCE</label>
+              <select id="marketplacepage-f2" value={province} onChange={e => setProvince(e.target.value)} style={{ ...inputStyle, padding: '8px 10px' }}>
                 {['All', 'Punjab', 'Sindh', 'KPK', 'Balochistan'].map(p => <option key={p}>{p}</option>)}
               </select>
             </div>
 
             <div style={{ marginBottom: 13 }}>
-              <label style={{ fontSize: 10, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5, letterSpacing: 0.5 }}>CITY</label>
-              <select value={city} onChange={e => setCity(e.target.value)} style={{ ...inputStyle, padding: '8px 10px' }}>
+              <label htmlFor="marketplacepage-f3" style={{ fontSize: 10, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5, letterSpacing: 0.5 }}>CITY</label>
+              <select id="marketplacepage-f3" value={city} onChange={e => setCity(e.target.value)} style={{ ...inputStyle, padding: '8px 10px' }}>
                 <option value="All">All Cities</option>
                 {cities.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
               </select>
             </div>
 
             <div style={{ marginBottom: 13 }}>
-              <label style={{ fontSize: 10, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5, letterSpacing: 0.5 }}>MAX PRICE (₨/unit)</label>
-              <input value={maxPrice} onChange={e => setMaxPrice(e.target.value)} placeholder="e.g. 4000" type="number" style={inputStyle} />
+              <label htmlFor="marketplacepage-f4" style={{ fontSize: 10, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5, letterSpacing: 0.5 }}>MAX PRICE (₨/unit)</label>
+              <input id="marketplacepage-f4" value={maxPrice} onChange={e => setMaxPrice(e.target.value)} placeholder="e.g. 4000" type="number" style={inputStyle} />
             </div>
 
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, cursor: 'pointer', marginBottom: 12 }}>
@@ -173,7 +172,6 @@ export default function MarketplacePage() {
                 <option value="featured">Featured</option>
                 <option value="price_asc">Price: Low → High</option>
                 <option value="price_desc">Price: High → Low</option>
-                <option value="rating">Top Rated</option>
                 <option value="newest">Newest</option>
               </select>
             </div>
@@ -201,6 +199,16 @@ export default function MarketplacePage() {
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(220px,1fr))', gap: 14 }}>
               {products.map(p => <ProductCard key={p.id} product={p} />)}
+            </div>
+          )}
+          {!loading && !error && products.length > 0 && (
+            <div style={{ textAlign: 'center', marginTop: 20 }}>
+              <div style={{ fontSize: 11, color: T.muted, marginBottom: 8 }}>Showing {products.length} of {total}</div>
+              {products.length < total && (
+                <button onClick={loadMore} disabled={loadingMore} style={{ padding: '9px 22px', borderRadius: 8, border: `1.5px solid ${T.green}`, background: T.white, color: T.green, fontWeight: 700, fontSize: 13, cursor: loadingMore ? 'wait' : 'pointer', fontFamily: 'inherit' }}>
+                  {loadingMore ? 'Loading…' : 'Load more'}
+                </button>
+              )}
             </div>
           )}
         </div>

@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import T from '../theme';
+import { clickable } from '../lib/a11y';
 
 export default function Footer() {
   const navigate = useNavigate();
@@ -14,20 +15,20 @@ export default function Footer() {
             </p>
           </div>
           {[
-            ['Marketplace', [['/', 'Browse Products'], ['/marketplace', 'Rice & Paddy'], ['/marketplace', 'Wheat & Maize'], ['/marketplace', 'Post a Listing']]],
-            ['Services',    [['/testing', 'Lab Testing'], ['/transport', 'Logistics'], ['/', 'KYC Verification'], ['/', 'Price Analytics']]],
-            ['Support',     [['/', 'Help Center'], ['/', 'Dispute Resolution'], ['/', 'Contact Us'], ['/', 'Terms of Use']]],
+            ['Marketplace', [['/marketplace', 'Browse Products'], ['/marketplace?category=rice', 'Rice'], ['/marketplace?category=wheat', 'Wheat'], ['/seller', 'Post a Listing']]],
+            ['Services',    [['/testing', 'Lab Testing'], ['/transport', 'Logistics'], ['/warehouse', 'Warehousing']]],
+            ['Support',     [['/help', 'Help Center'], ['/disputes', 'Dispute Resolution'], ['/contact', 'Contact Us'], ['/terms', 'Terms of Use']]],
           ].map(([title, links]) => (
             <div key={title}>
               <div style={{ color: T.gold, fontWeight: 700, fontSize: 12, marginBottom: 12, letterSpacing: 0.5 }}>{title}</div>
               {links.map(([path, label]) => (
-                <div key={label} onClick={() => navigate(path)} style={{ fontSize: 12, marginBottom: 7, color: 'rgba(255,255,255,0.5)', cursor: 'pointer' }}>{label}</div>
+                <div key={label} {...clickable(() => navigate(path))} style={{ fontSize: 12, marginBottom: 7, color: 'rgba(255,255,255,0.5)', cursor: 'pointer' }}>{label}</div>
               ))}
             </div>
           ))}
         </div>
         <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 16, display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, fontSize: 11, color: 'rgba(255,255,255,0.3)' }}>
-          <span>© 2025 AgriConnect Pakistan. All rights reserved.</span>
+          <span>© {new Date().getFullYear()} AgriConnect Pakistan. All rights reserved.</span>
           <span>Built in 🇵🇰 Pakistan · Lahore, Punjab</span>
         </div>
       </div>

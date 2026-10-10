@@ -1,0 +1,16 @@
+name: Frontend CI
+on:
+  push: { branches: [main] }
+  pull_request:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      # VITE_API_URL must be set or the build tree-shakes the app away (see M8 notes)
+      - run: VITE_API_URL=https://api.example.com npm run build

@@ -1,8 +1,10 @@
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Btn } from './ui';
+import NotificationBell from './NotificationBell';
 import T from '../theme';
 import { portalPathForRole, portalIconForRole } from '../lib/roles';
+import { clickable } from '../lib/a11y';
 
 export default function Navbar() {
   const navigate = useNavigate();
@@ -22,7 +24,7 @@ export default function Navbar() {
       <div style={{ maxWidth: 1200, margin: '0 auto', padding: '0 20px', display: 'flex', alignItems: 'center', gap: 16, height: 58 }}>
 
         {/* Logo */}
-        <div onClick={() => navigate('/')} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', flexShrink: 0 }}>
+        <div {...clickable(() => navigate('/'))} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', flexShrink: 0 }}>
           <span style={{ fontSize: 22 }}>🌾</span>
           <span style={{ color: T.bg, fontWeight: 900, fontSize: 16, letterSpacing: '-0.3px' }}>AgriConnect</span>
           <span style={{ color: T.gold, fontSize: 10, fontWeight: 700, background: 'rgba(183,160,90,0.2)', padding: '1px 6px', borderRadius: 4 }}>PK</span>
@@ -56,6 +58,7 @@ export default function Navbar() {
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
           {user ? (
             <>
+              <NotificationBell />
               <button
                 onClick={() => navigate(portalPathForRole(user.role))}
                 style={{ background: 'rgba(116,198,157,0.15)', border: '1px solid rgba(116,198,157,0.3)', color: T.mint, padding: '7px 14px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 12, fontFamily: 'inherit' }}
