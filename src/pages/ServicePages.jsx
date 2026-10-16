@@ -211,7 +211,12 @@ export function TransportPage() {
   const openBooking = (t) => {
     if (!user) { openLogin(); return; }
     setSelected(t); setBooked(false); setBookError('');
-    setForm(f => ({ ...f, pickup: from, delivery: to, vehicleType: t.vehicles?.[0] || '' }));
+    setForm(f => ({
+  ...f,
+  pickup: from,
+  delivery: to,
+  vehicleType: t._raw?.vehicleTypes?.[0] || '',
+}));
   };
 
   const handleBook = async () => {
@@ -313,7 +318,11 @@ export function TransportPage() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 10, marginBottom: 12 }}>
             <div><label htmlFor="servicepages-f4" style={{ fontSize: 11, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5 }}>VEHICLE TYPE</label>
               <select id="servicepages-f4" value={form.vehicleType} onChange={setF('vehicleType')} style={inputStyle}>
-                {(selected.vehicles || []).map(v => <option key={v}>{v}</option>)}
+                {(selected._raw?.vehicleTypes || []).map(v => (
+  <option key={v} value={v}>
+    {v.split('_').map(w => w.charAt(0) + w.slice(1).toLowerCase()).join(' ')}
+  </option>
+))}
               </select></div>
             <div><label htmlFor="servicepages-f5" style={{ fontSize: 11, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5 }}>REQUIRED DATE</label>
               <input id="servicepages-f5" type="date" value={form.requiredDate} min={new Date().toISOString().slice(0, 10)} onChange={setF('requiredDate')} style={inputStyle} /></div>
