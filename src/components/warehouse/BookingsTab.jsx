@@ -39,7 +39,7 @@ export function BookingsTab({ openLogin, MY_BOOKINGS, bookingsState, setThreadBo
             const sc = STATUS_COLORS[b.status] || { bg:'#F3F4F6', c:'#6B7280', l:b.status };
             const canCancel = b.status==='requested' || b.status==='accepted';
             return (
-              <Card key={b.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:10}}>
+              <div key={b.id} data-focus-id={b.id}><Card style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:10}}>
                 <div>
                   <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:3}}>
                     <span style={{fontSize:11,fontWeight:800,color:T.muted,letterSpacing:0.3}}>{b.reference}</span>
@@ -101,7 +101,7 @@ export function BookingsTab({ openLogin, MY_BOOKINGS, bookingsState, setThreadBo
                     {b.gatePass?.status==='REJECTED' && <span style={{color:T.muted}}>Last release request rejected</span>}
                   </div>
                 )}
-              </Card>
+              </Card></div>
             );
           })}
         </div>

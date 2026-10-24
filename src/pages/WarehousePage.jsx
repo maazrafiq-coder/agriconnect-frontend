@@ -16,9 +16,14 @@ import { BookingsTab } from '../components/warehouse/BookingsTab';
 import { ReceiptsTab } from '../components/warehouse/ReceiptsTab';
 import { HowItWorksTab } from '../components/warehouse/HowItWorksTab';
 
+import { useApprovalGate } from '../context/ApprovalGate';
+import { useDeepLink } from '../lib/deeplink';
+import DeepLinkNotice from '../components/DeepLinkNotice';
+import ConfirmDialog from '../components/ui/ConfirmDialog';
 // ─── MAIN MODULE ──────────────────────────────────────────────────────────────
 export default function WarehouseModule() {
   const { user, openLogin } = useAuth();
+  const gate = useApprovalGate();
   const [tab, setTab] = useState('browse');
   const [WAREHOUSES, setWAREHOUSES] = useState([]);
   const [warehousesState, setWarehousesState] = useState('loading'); // loading | ready | error
@@ -59,19 +64,9 @@ export default function WarehouseModule() {
       else setDocError('This document has not been issued yet.');
     } catch (e) { setDocError(e.message || 'Could not open the document.'); }
   };
-  const decideGateOut = async (bookingId, passId, approve) => {
-    let note;
-    if (!approve) {
-      note = window.prompt('Reason for rejecting this release (optional):', '');
-      if (note === null) return;
-    } else if (!window.confirm('Approve release of your goods? A Gate Out Pass will be issued.')) return;
-    setDocError(''); setDocBusyId(bookingId);
-    try {
-      if (approve) await apiApproveGateOut(passId); else await apiRejectGateOut(passId, note || undefined);
-      loadBookings();
-    } catch (e) { setDocError(e.message || 'Could not update the gate-out request.'); }
-    finally { setDocBusyId(null); }
-  };
+  const [gateDecision, setGateDecision] = useState(null); // { passId, approve }
+  const [withdrawTarget, setWithdrawTarget] = useState(null); // receipt whose loan application is being withdrawn
+  const decideGateOut = (bookingId, passId, approve) => { setDocError(''); setGateDecision({ bookingId, passId, approve }); };
 
   const loadBookings = () => {
     if (!user) { setBookingsState('guest'); setMY_BOOKINGS([]); return; }
@@ -90,6 +85,14 @@ export default function WarehouseModule() {
   const [insureReceipt, setInsureReceipt] = useState(null);
   const [cancelBookingTarget, setCancelBookingTarget] = useState(null);
 
+  // Notification links: ?tab=bookings&type=booking&id=… (also receipts).
+  const deepLink = useDeepLink({
+    validTabs: ['browse', 'bookings', 'receipts', 'howItWorks'],
+    setTab,
+    lookup: { booking: { ready: bookingsState === 'ready', ids: MY_BOOKINGS.map(b => b.id) } },
+  });
+
+
   // Guests must not be able to reach the booking / lien / insurance forms at
   // all — trying to submit and only then discovering the request 401'd is a
   // worse experience than being asked to log in up front. The backend
@@ -98,6 +101,7 @@ export default function WarehouseModule() {
   // through a form only to hit an auth wall at the very end.
   const requireAuth = (fn) => (...args) => {
     if (!user) { openLogin(); return; }
+    if (!gate.approved) { gate(null, 'use this warehouse service')(); return; }
     fn(...args);
   };
   const handleBook = requireAuth(setBookingWarehouse);
@@ -157,6 +161,7 @@ export default function WarehouseModule() {
 
       {/* MAIN CONTENT */}
       <div style={{maxWidth:1100,margin:'0 auto',padding:'28px 20px'}}>
+        <DeepLinkNotice notice={deepLink.notice} onDismiss={deepLink.dismiss} />
         <TabBar
           tabs={[['browse','🏪 Browse Warehouses'],['bookings','📋 My Bookings ('+MY_BOOKINGS.length+')'],['receipts','📄 My Receipts ('+MY_RECEIPTS.length+')'],['howItWorks','💡 How It Works']]}
           active={tab} onChange={setTab}
@@ -183,16 +188,45 @@ export default function WarehouseModule() {
           receipt={viewReceipt}
           onClose={()=>setViewReceipt(null)}
           onPlaceLien={r=>{setViewReceipt(null);handlePlaceLien(r);}}
-          onWithdrawLien={async r=>{
-            if(!window.confirm('Withdraw this loan application? Your goods will no longer be on hold.')) return;
-            try { await apiWithdrawLien(r.lien.id); setViewReceipt(null); loadReceipts(); loadBookings(); }
-            catch(e){ alert(e?.message || 'Could not withdraw the application.'); }
-          }}
+          onWithdrawLien={r=>setWithdrawTarget(r)}
           onBuyInsurance={r=>{setViewReceipt(null);handleBuyInsurance(r);}}
         />
       )}
       {lienReceipt && <BankLienModal receipt={lienReceipt} onClose={()=>{setLienReceipt(null); loadReceipts(); loadBookings();}}/>}
-      {insureReceipt && <InsuranceModal receipt={insureReceipt} onClose={()=>setInsureReceipt(null)}/>}
+      {insureReceipt && <InsuranceModal receipt={insureReceipt} onClose={()=>{setInsureReceipt(null); loadReceipts();}}/>}
+      {gateDecision && (
+        <ConfirmDialog
+          title={gateDecision.approve ? 'Approve gate-out' : 'Reject gate-out'}
+          danger={!gateDecision.approve}
+          confirmLabel={gateDecision.approve ? 'Approve release' : 'Reject release'}
+          description={gateDecision.approve ? 'Approve release of your goods?' : 'Reject this release request?'}
+          consequences={gateDecision.approve ? ['A Gate Out Pass will be issued.'] : ['The goods stay in the warehouse.']}
+          reasonLabel={gateDecision.approve ? undefined : 'Reason for rejecting this release'}
+          reasonRequired={!gateDecision.approve}
+          success={() => ({
+            icon: gateDecision.approve ? '🚪' : '✅',
+            title: gateDecision.approve ? 'Release approved' : 'Release rejected',
+            message: gateDecision.approve ? 'The warehouse can now issue your Gate Out Pass.' : 'Your goods stay in the warehouse and the operator has been told why.',
+          })}
+          onDone={() => setGateDecision(null)}
+          onConfirm={async ({ reason }) => {
+            if (gateDecision.approve) await apiApproveGateOut(gateDecision.passId);
+            else await apiRejectGateOut(gateDecision.passId, reason);
+            loadBookings();
+          }}
+          onClose={() => setGateDecision(null)}
+        />
+      )}
+      {withdrawTarget && (
+        <ConfirmDialog
+          title="Withdraw loan application" danger confirmLabel="Withdraw application"
+          description="Withdraw this loan application?"
+          consequences={['Your goods will no longer be on hold.']}
+          success={() => ({ title: 'Application withdrawn', message: 'Your goods are no longer on hold.' })}
+          onConfirm={async () => { await apiWithdrawLien(withdrawTarget.lien.id); setViewReceipt(null); loadReceipts(); loadBookings(); }}
+          onClose={() => setWithdrawTarget(null)}
+        />
+      )}
       {threadBooking && (
         <Modal title={`Messages — ${threadBooking.reference || threadBooking.warehouseName}`} onClose={()=>{setThreadBooking(null); loadBookings();}} width={560}>
           <div style={{fontSize:12,color:T.muted,marginBottom:10}}>{threadBooking.warehouseName} · {threadBooking.commodity} — {threadBooking.qty} tons</div>
@@ -202,7 +236,7 @@ export default function WarehouseModule() {
       {cancelBookingTarget && (
         <CancelBookingModal
           booking={cancelBookingTarget}
-          onClose={()=>setCancelBookingTarget(null)}
+          onClose={()=>{ setCancelBookingTarget(null); loadBookings(); loadWarehouses(); }}
           onCancelled={()=>{ setCancelBookingTarget(null); loadBookings(); loadWarehouses(); }}
         />
       )}

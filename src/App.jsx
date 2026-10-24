@@ -2,6 +2,8 @@ import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Navbar from './components/Navbar';
+import AccountStatusBanner from './components/AccountStatusBanner';
+import { ApprovalGateProvider } from './context/ApprovalGate';
 import ErrorBoundary from './components/ErrorBoundary';
 import { LoadingState } from './components/ui';
 import HomePage from './pages/HomePage';
@@ -30,13 +32,16 @@ const DisputesPage = named(() => import('./pages/InfoPages'), 'DisputesPage');
 const ContactPage  = named(() => import('./pages/InfoPages'), 'ContactPage');
 const TermsPage    = named(() => import('./pages/InfoPages'), 'TermsPage');
 import ProtectedRoute from './components/ProtectedRoute';
+import NoticeHost from './components/ui/NoticeHost';
 
 // Inner app — needs auth context available
 function AppInner() {
   const { authModal } = useAuth();
   return (
     <>
+      <NoticeHost />
       <Navbar />
+      <AccountStatusBanner />
       <Suspense fallback={<LoadingState />}>
       <Routes>
         <Route path="/"            element={<HomePage />} />
@@ -77,7 +82,9 @@ export default function App() {
     <ErrorBoundary>
       <BrowserRouter>
         <AuthProvider>
-          <AppInner />
+          <ApprovalGateProvider>
+            <AppInner />
+          </ApprovalGateProvider>
         </AuthProvider>
       </BrowserRouter>
     </ErrorBoundary>

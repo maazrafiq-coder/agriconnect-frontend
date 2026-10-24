@@ -1,17 +1,21 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { apiGetProduct, apiSubmitOffer, apiBookTesting, apiToggleSaveProduct, apiGetSavedProducts } from '../lib/api';
+import { apiGetProduct, apiToggleSaveProduct, apiGetSavedProducts } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
-import { adaptProduct, adaptAgencies, toOfferRequest } from '../lib/adapters';
+import LabBookingFlow from '../components/testing/LabBookingFlow';
+import MakeOfferFlow from '../components/offers/MakeOfferFlow';
+import { adaptProduct, adaptAgencies } from '../lib/adapters';
 import { apiGetAgencies } from '../lib/api';
 import { Badge, Btn, Card, Stars, Modal, MetricPill, ErrorState, LoadingState } from '../components/ui';
 import T from '../theme';
 import { clickable } from '../lib/a11y';
 
+import { useApprovalGate } from '../context/ApprovalGate';
 export default function ProductDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, openLogin } = useAuth();
+  const gate = useApprovalGate();
   const [saved,   setSaved]   = useState(false);
   const [saving,  setSaving]  = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
@@ -23,13 +27,6 @@ export default function ProductDetailPage() {
   const [offerModal,  setOfferModal]  = useState(false);
   const [testModal,   setTestModal]   = useState(false);
   const [bookAgency,  setBookAgency]  = useState(null);
-  const [offerPrice,  setOfferPrice]  = useState('');
-  const [offerQty,    setOfferQty]    = useState('');
-  const [offerMsg,    setOfferMsg]    = useState('');
-  const [offerSent,   setOfferSent]   = useState(false);
-  const [booked,      setBooked]      = useState(false);
-  const [offerError,  setOfferError]  = useState('');
-  const [testError,   setTestError]   = useState('');
   const [activeImage, setActiveImage] = useState(0);
 
   const load = () => {
@@ -40,8 +37,6 @@ export default function ProductDetailPage() {
       apiGetAgencies().then(r => adaptAgencies(r || [])).catch(() => []),
     ]).then(([product, agList]) => {
       setP(product);
-      setOfferPrice(String(product.price));
-      setOfferQty(String(product.minOrder));
       setAgencies(agList);
     }).catch(err => {
       // A real "product not found or API failed" must surface as such —
@@ -73,26 +68,6 @@ export default function ProductDetailPage() {
     finally { setSaving(false); }
   };
 
-  const handleOffer = async () => {
-    setOfferError('');
-    try {
-      await apiSubmitOffer(toOfferRequest({ productId: p._raw?.id || p.id, offeredPrice: offerPrice, quantity: offerQty, message: offerMsg }));
-      setOfferSent(true);
-    } catch (err) {
-      setOfferError(err.message || 'Failed to send offer');
-    }
-  };
-
-  const handleBookTest = async () => {
-    setTestError('');
-    try {
-      await apiBookTesting({ agencyId: bookAgency.userId || bookAgency.id, productId: p._raw?.id || p.id, servicesRequested: bookAgency.services });
-      setBooked(true);
-    } catch (err) {
-      setTestError(err?.message || 'Failed to book testing. Please try again.');
-    }
-  };
-
   if (loading) return (
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: '60px 20px' }}>
       <LoadingState label="Loading product…" />
@@ -116,7 +91,6 @@ export default function ProductDetailPage() {
     { label: 'Milling Yield', val: p.metrics.milling   != null ? `${p.metrics.milling}%`    : '—', ok: p.metrics.milling > 65    },
   ];
 
-  const inputStyle = { width: '100%', padding: '9px 12px', border: `1.5px solid ${T.border}`, borderRadius: 7, fontSize: 13, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' };
 
   return (
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: '28px 20px' }}>
@@ -199,8 +173,8 @@ export default function ProductDetailPage() {
               <div style={{ fontSize: 12, color: T.muted }}>per {p.unit} · Min. order {p.minOrder} {p.unit}</div>
               {p.qty < 100 && <div style={{ fontSize: 11, color: T.danger, fontWeight: 700, marginTop: 4 }}>⚠ Limited stock</div>}
             </div>
-            <Btn variant="primary" style={{ width: '100%', display: 'block', marginBottom: 9, padding: '11px' }} onClick={() => setOfferModal(true)}>💬 Make an Offer</Btn>
-            <Btn variant="secondary" style={{ width: '100%', display: 'block', marginBottom: 9 }} onClick={() => setTestModal(true)}>🧪 Request Lab Test</Btn>
+            <Btn variant="primary" style={{ width: '100%', display: 'block', marginBottom: 9, padding: '11px' }} onClick={gate(() => setOfferModal(true), 'make an offer')}>💬 Make an Offer</Btn>
+            <Btn variant="secondary" style={{ width: '100%', display: 'block', marginBottom: 9 }} onClick={gate(() => setTestModal(true), 'request a lab test')}>🧪 Request Lab Test</Btn>
             <Btn variant="ghost" style={{ width: '100%', display: 'block', marginBottom: 9 }} onClick={() => navigate('/transport')}>🚛 Arrange Transport</Btn>
             {p.sellerId !== user?.id && (
               <Btn variant="ghost" style={{ width: '100%', display: 'block' }} disabled={saving} onClick={toggleSave}>
@@ -229,55 +203,15 @@ export default function ProductDetailPage() {
         </div>
       </div>
 
-      {/* ── OFFER MODAL ── */}
-      {offerModal && (
-        <Modal title="Make an Offer" onClose={() => { setOfferModal(false); setOfferSent(false); setOfferError(''); }}>
-          {offerSent ? (
-            <div style={{ textAlign: 'center', padding: '24px 0' }}>
-              <div style={{ fontSize: 52, marginBottom: 14 }}>✅</div>
-              <h3 style={{ color: T.green, margin: '0 0 10px' }}>Offer Sent!</h3>
-              <p style={{ color: T.muted, fontSize: 13, margin: '0 0 22px', lineHeight: 1.6 }}>The seller will respond within 24 hours. You'll be notified by SMS and email.</p>
-              <Btn variant="primary" onClick={() => setOfferModal(false)}>Close</Btn>
-            </div>
-          ) : (
-            <>
-              <div style={{ background: T.surface, borderRadius: 8, padding: '10px 14px', marginBottom: 16 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: T.green }}>{p.name}</div>
-                <div style={{ fontSize: 12, color: T.muted }}>Asking: ₨{p.price.toLocaleString()} / {p.unit}</div>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))', gap: 12, marginBottom: 12 }}>
-                <div>
-                  <label htmlFor="productdetailpage-f1" style={{ fontSize: 11, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5 }}>YOUR PRICE (₨)</label>
-                  <input id="productdetailpage-f1" value={offerPrice} onChange={e => setOfferPrice(e.target.value)} type="number" style={inputStyle} />
-                </div>
-                <div>
-                  <label htmlFor="productdetailpage-f2" style={{ fontSize: 11, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5 }}>QUANTITY ({p.unit})</label>
-                  <input id="productdetailpage-f2" value={offerQty} onChange={e => setOfferQty(e.target.value)} type="number" style={inputStyle} />
-                </div>
-              </div>
-              <div style={{ marginBottom: 16 }}>
-                <label htmlFor="productdetailpage-f3" style={{ fontSize: 11, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5 }}>MESSAGE TO SELLER</label>
-                <textarea id="productdetailpage-f3" value={offerMsg} onChange={e => setOfferMsg(e.target.value)} placeholder="Introduce yourself, mention delivery location…" rows={3} style={{ ...inputStyle, resize: 'vertical' }} />
-              </div>
-              {offerPrice && offerQty && (
-                <div style={{ background: '#F0FDF4', borderRadius: 8, padding: '10px 14px', marginBottom: 16 }}>
-                  <div style={{ fontSize: 11, color: T.muted }}>Total Estimated Value</div>
-                  <div style={{ fontSize: 20, fontWeight: 900, color: T.green }}>₨{(Number(offerPrice) * Number(offerQty)).toLocaleString()}</div>
-                </div>
-              )}
-              {offerError && <div style={{ fontSize: 12, color: T.danger, marginBottom: 12, background: '#FEE2E2', padding: '8px 12px', borderRadius: 7 }}>⚠ {offerError}</div>}
-              <Btn variant="primary" style={{ width: '100%', padding: '11px' }} onClick={handleOffer}>Send Offer →</Btn>
-            </>
-          )}
-        </Modal>
-      )}
+      {/* ── OFFER FLOW (form → review incl. payment terms → success) ── */}
+      {offerModal && <MakeOfferFlow product={p} onClose={() => setOfferModal(false)} />}
 
       {/* ── TESTING MODAL — pick agency ── */}
       {testModal && !bookAgency && (
         <Modal title="Request Lab Testing" onClose={() => setTestModal(false)}>
           <p style={{ color: T.muted, fontSize: 13, marginBottom: 16 }}>Select a certified testing agency to verify this product's quality metrics.</p>
           {agencies.slice(0, 3).map(a => (
-            <div key={a.id} {...clickable(() => { setTestError(''); setBookAgency(a); })} style={{ border: `2px solid ${T.border}`, borderRadius: 10, padding: 14, marginBottom: 10, cursor: 'pointer' }}>
+            <div key={a.id} {...clickable(() => setBookAgency(a))} style={{ border: `2px solid ${T.border}`, borderRadius: 10, padding: 14, marginBottom: 10, cursor: 'pointer' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div>
                   <div style={{ fontWeight: 700, fontSize: 13, color: T.green }}>{a.name}</div>
@@ -294,32 +228,14 @@ export default function ProductDetailPage() {
         </Modal>
       )}
 
-      {/* ── TESTING MODAL — confirm ── */}
-      {testModal && bookAgency && !booked && (
-        <Modal title={`Book: ${bookAgency.name}`} onClose={() => setBookAgency(null)}>
-          <div style={{ marginBottom: 14 }}>
-            {(bookAgency.services || []).map(s => <label key={s} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', cursor: 'pointer', fontSize: 13 }}><input type="checkbox" defaultChecked /> {s}</label>)}
-          </div>
-          <label htmlFor="productdetailpage-f4" style={{ fontSize: 11, fontWeight: 700, color: T.muted, display: 'block', marginBottom: 5 }}>PREFERRED DATE</label>
-          <input id="productdetailpage-f4" type="date" style={{ ...inputStyle, marginBottom: 14 }} />
-          <div style={{ background: '#F0FDF4', borderRadius: 8, padding: '10px 14px', marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: 12, color: T.muted }}>Estimated fee</span>
-            <span style={{ fontSize: 16, fontWeight: 800, color: T.green }}>₨{bookAgency.price.toLocaleString()}</span>
-          </div>
-          {testError && <div style={{ fontSize: 12, color: T.danger, marginBottom: 12, background: '#FEE2E2', padding: '8px 12px', borderRadius: 7 }}>⚠ {testError}</div>}
-          <Btn variant="primary" style={{ width: '100%', padding: '11px' }} onClick={handleBookTest}>Confirm & Pay →</Btn>
-        </Modal>
-      )}
-
-      {testModal && bookAgency && booked && (
-        <Modal title="Testing Booked!" onClose={() => { setTestModal(false); setBookAgency(null); setBooked(false); }}>
-          <div style={{ textAlign: 'center', padding: '24px 0' }}>
-            <div style={{ fontSize: 52, marginBottom: 14 }}>🧪</div>
-            <h3 style={{ color: '#059669', margin: '0 0 10px' }}>Request Submitted</h3>
-            <p style={{ color: T.muted, fontSize: 13, margin: '0 0 22px', lineHeight: 1.6 }}>{bookAgency.name} will contact you to confirm. The report will be attached to this listing once ready.</p>
-            <Btn variant="primary" onClick={() => { setTestModal(false); setBookAgency(null); setBooked(false); }}>Done</Btn>
-          </div>
-        </Modal>
+      {/* ── TESTING — details → review → confirmation (no payment is taken) ── */}
+      {testModal && bookAgency && (
+        <LabBookingFlow
+          agency={bookAgency}
+          product={{ id: p._raw?.id || p.id, name: p.name }}
+          onClose={() => { setTestModal(false); setBookAgency(null); }}
+          onLogin={openLogin}
+        />
       )}
     </div>
   );

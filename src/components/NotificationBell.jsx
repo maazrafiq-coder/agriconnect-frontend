@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+import { resolveNotificationTarget } from '../lib/deeplink';
 import {
   apiGetNotifications, apiGetUnreadNotificationCount,
   apiMarkNotificationRead, apiMarkAllNotificationsRead,
@@ -15,13 +17,21 @@ function timeAgo(d) {
   return `${Math.floor(s / 86400)}d ago`;
 }
 
-const ICONS = { LOAN_UPDATE: '🏦', WAREHOUSE_UPDATE: '🏪', KYC_UPDATE: '🪪', ORDER_UPDATE: '📋', OFFER_RECEIVED: '💬' };
+const ICONS = {
+  LOAN_UPDATE: '🏦', WAREHOUSE_UPDATE: '🏪', KYC_UPDATE: '🪪', ORDER_UPDATE: '📋', OFFER_RECEIVED: '💬',
+  OFFER_ACCEPTED: '🤝', OFFER_REJECTED: '❌', TESTING_UPDATE: '🧪', TRANSPORT_UPDATE: '🚚', PAYMENT_RECEIVED: '💰', PAYMENT_DUE: '⏰', SYSTEM: '🔔',
+};
 
 // Bell in the navbar: polls the unread count, loads the list when opened,
-// and deep-links to the page named in each notification's `data.link`.
+// and deep-links to the destination in each notification's `data`
+// (route + tab + record id; see lib/deeplink.js). The destination lives in the
+// URL, so it keeps working after a refresh.
 export default function NotificationBell() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [open, setOpen] = useState(false);
+  const [markFailed, setMarkFailed] = useState({});   // id -> true when "mark as read" did not reach the server
+  const [noDest, setNoDest] = useState('');
   const [unread, setUnread] = useState(0);
   const [items, setItems] = useState(null);
   const [error, setError] = useState('');
@@ -45,14 +55,31 @@ export default function NotificationBell() {
     return () => document.removeEventListener('mousedown', close);
   }, [open]);
 
-  const openItem = async (n) => {
-    setOpen(false);
-    if (!n.isRead) {
-      setItems(list => (list || []).map(x => x.id === n.id ? { ...x, isRead: true } : x));
-      setUnread(c => Math.max(0, c - 1));
-      apiMarkNotificationRead(n.id).catch(() => {});
+  const markRead = async (n) => {
+    setItems(list => (list || []).map(x => x.id === n.id ? { ...x, isRead: true } : x));
+    setUnread(c => Math.max(0, c - 1));
+    setMarkFailed(f => { const { [n.id]: _drop, ...rest } = f; return rest; });
+    try {
+      await apiMarkNotificationRead(n.id);
+    } catch {
+      // Don't pretend it was read: put it back as unread and offer a retry.
+      setItems(list => (list || []).map(x => x.id === n.id ? { ...x, isRead: false } : x));
+      setUnread(c => c + 1);
+      setMarkFailed(f => ({ ...f, [n.id]: true }));
     }
-    if (n.data?.link) navigate(n.data.link);
+  };
+
+  const openItem = (n) => {
+    const target = resolveNotificationTarget(n, user);
+    if (!n.isRead) markRead(n); // fire and forget; failure is surfaced on the item
+    if (target) {
+      setNoDest('');
+      setOpen(false);
+      navigate(target);
+    } else {
+      // Nothing to open: keep the panel open and say so instead of doing nothing.
+      setNoDest(n.id);
+    }
   };
 
   const markAll = async () => {
@@ -101,6 +128,13 @@ export default function NotificationBell() {
                     <div style={{ fontSize: 10, color: T.muted, whiteSpace: 'nowrap' }}>{timeAgo(n.createdAt)}</div>
                   </div>
                   <div style={{ fontSize: 12, color: T.muted, marginTop: 2, lineHeight: 1.45 }}>{n.body}</div>
+                  {noDest === n.id && <div role="status" style={{ fontSize: 11, color: T.warnText, marginTop: 3 }}>This notification has no page to open.</div>}
+                  {markFailed[n.id] && (
+                    <div role="alert" style={{ fontSize: 11, color: T.danger, marginTop: 3 }}>
+                      Couldn’t mark as read.{' '}
+                      <button type="button" onClick={(e) => { e.stopPropagation(); markRead(n); }} style={{ background: 'none', border: 'none', color: T.danger, textDecoration: 'underline', cursor: 'pointer', fontSize: 11, padding: 0, fontFamily: 'inherit' }}>Retry</button>
+                    </div>
+                  )}
                 </div>
                 {!n.isRead && <div style={{ width: 8, height: 8, borderRadius: '50%', background: T.green, marginTop: 5, flexShrink: 0 }} />}
               </div>

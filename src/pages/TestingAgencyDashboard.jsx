@@ -4,7 +4,8 @@ import {
   apiGetMyAgency, apiRegisterAgency, apiUpdateMyAgency, apiUpdateTestingStatus, apiSubmitTestingReport, apiUploadTestingReportFile,
   apiGetMyProviderClarifications, apiRespondToClarification,
 } from '../lib/api';
-import { Card, Btn, Badge, Modal, LoadingState } from '../components/ui';
+import { Card, Btn, Badge, LoadingState, InfoRow } from '../components/ui';
+import RequestFlowModal from '../components/ui/RequestFlowModal';
 import MediaManagerModal from '../components/MediaManager';
 import ClarificationThread from '../components/ClarificationThread';
 import T from '../theme';
@@ -40,6 +41,8 @@ function RegisterAgencyForm({ onRegistered, initial, onCancel }) {
   });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [reviewing, setReviewing] = useState(false);
+  const [done, setDone] = useState(false);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
   const toggleService = (s) => {
@@ -49,13 +52,19 @@ function RegisterAgencyForm({ onRegistered, initial, onCancel }) {
     }));
   };
 
-  const submit = async (e) => {
+  const goNext = async (e) => {
     e.preventDefault();
     setError('');
     if (!form.name || !form.city) return setError('Name and city are required.');
     if (!form.services.length) return setError('Select at least one testing service you offer.');
     if (!form.basePrice) return setError('Base price is required.');
+    if (editing) return submit();   // changes to an existing listing save directly
+    setReviewing(true);
+  };
 
+  const submit = async () => {
+    if (busy) return;
+    setError('');
     setBusy(true);
     try {
       const save = editing ? apiUpdateMyAgency : apiRegisterAgency;
@@ -65,12 +74,47 @@ function RegisterAgencyForm({ onRegistered, initial, onCancel }) {
         accreditations: form.accreditations.split(',').map(s => s.trim()).filter(Boolean),
         coverageAreas: form.coverageAreas.split(',').map(s => s.trim()).filter(Boolean),
       });
-      onRegistered();
+      if (editing) onRegistered(); else setDone(true);
     } catch (err) {
       setError(err.message || 'Could not register your lab.');
+    } finally {
       setBusy(false);
     }
   };
+
+  if (done) {
+    return (
+      <Card style={{ maxWidth: 560, margin: '0 auto', textAlign: 'center' }}>
+        <div aria-hidden="true" style={{ fontSize: 48, marginBottom: 10 }}>🧪</div>
+        <h3 role="status" style={{ margin: '0 0 8px', color: T.green }}>Lab submitted</h3>
+        <p style={{ fontSize: 13, color: T.muted, lineHeight: 1.6, margin: '0 0 8px' }}>{form.name} is awaiting verification by AgriConnect. It is not bookable until it is verified; you will be notified of the outcome.</p>
+        <Btn variant="primary" onClick={() => onRegistered()}>Done</Btn>
+      </Card>
+    );
+  }
+
+  if (reviewing) {
+    return (
+      <Card style={{ maxWidth: 560, margin: '0 auto' }}>
+        <h3 style={{ margin: '0 0 4px', fontSize: 16, fontWeight: 800, color: T.green }}>Review your lab</h3>
+        <p style={{ margin: '0 0 14px', fontSize: 12.5, color: T.muted }}>Submitting sends this listing to AgriConnect for verification before it can receive bookings.</p>
+        <div style={{ background: T.surface, borderRadius: 10, padding: '4px 14px', marginBottom: 14 }}>
+          <InfoRow label="Name" value={form.name} />
+          <InfoRow label="Location" value={`${form.city}, ${form.province}`} />
+          <InfoRow label="Services" value={form.services.join(', ')} />
+          <InfoRow label="Base price" value={`₨${Number(form.basePrice).toLocaleString()}`} />
+          <InfoRow label="Turnaround" value={`${form.turnaroundHours} hours`} />
+          <InfoRow label="Accreditations" value={form.accreditations || 'None listed'} />
+          <InfoRow label="Coverage areas" value={form.coverageAreas || 'Not specified'} />
+        </div>
+        {error && <p role="alert" style={{ color: T.danger, fontSize: 12, marginBottom: 12 }}>{error}</p>}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 8 }}>
+          <Btn variant="ghost" onClick={() => { setError(''); setReviewing(false); }} disabled={busy}>← Back</Btn>
+          <Btn variant="primary" onClick={submit} disabled={busy}>{busy ? 'Submitting…' : 'Submit for verification'}</Btn>
+        </div>
+      </Card>
+    );
+  }
 
   return (
     <Card style={{ maxWidth: 560, margin: '0 auto' }}>
@@ -78,7 +122,7 @@ function RegisterAgencyForm({ onRegistered, initial, onCancel }) {
       <p style={{ margin: '0 0 20px', fontSize: 12.5, color: T.muted }}>
         Set up your lab's listing once — buyers and sellers will be able to book tests with you from the marketplace.
       </p>
-      <form onSubmit={submit}>
+      <form onSubmit={goNext}>
         <div style={{ marginBottom: 12 }}>
           <label htmlFor="testingagencydashboard-f1" style={labelStyle}>LAB / AGENCY NAME</label>
           <input id="testingagencydashboard-f1" style={inputStyle} value={form.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Punjab Food Authority Lab" />
@@ -130,7 +174,7 @@ function RegisterAgencyForm({ onRegistered, initial, onCancel }) {
           <input id="testingagencydashboard-f7" style={inputStyle} value={form.coverageAreas} onChange={e => set('coverageAreas', e.target.value)} placeholder="Lahore, Sheikhupura, Gujranwala" />
         </div>
         {error && <p style={{ color: T.danger, fontSize: 12, marginBottom: 12 }}>{error}</p>}
-        <Btn type="submit" variant="primary" disabled={busy} style={{ width: '100%' }}>{busy ? 'Saving…' : editing ? 'Save Changes' : 'Register Lab'}</Btn>
+        <Btn type="submit" variant="primary" disabled={busy} style={{ width: '100%' }}>{busy ? 'Saving…' : editing ? 'Save Changes' : 'Review →'}</Btn>
         {editing && <Btn type="button" variant="ghost" onClick={onCancel} style={{ width: '100%', marginTop: 8 }}>Cancel</Btn>}
       </form>
     </Card>
@@ -142,35 +186,13 @@ function SubmitReportModal({ request, onClose, onSubmitted }) {
   const [file, setFile] = useState(null);
   const [reportUrl, setReportUrl] = useState('');
   const [notes, setNotes] = useState('');
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
   const alreadyUploaded = !!request.reportFileKey;
+  const requester = request.requester?.profile?.fullName || 'the requester';
+  const services = request.servicesRequested?.join(', ');
 
-  const submit = async () => {
-    setError('');
-    if (!file && !alreadyUploaded && !reportUrl.trim() && !notes.trim()) {
-      return setError('Attach the report file (PDF, JPG or PNG), or enter a link or result notes.');
-    }
-    setBusy(true);
-    try {
-      // The file is stored permanently; the requester gets a fresh download link each time.
-      if (file) await apiUploadTestingReportFile(request.id, file);
-      await apiSubmitTestingReport(request.id, {
-        reportUrl: reportUrl.trim() || undefined,
-        reportData: notes ? { notes } : undefined,
-      });
-      onSubmitted();
-    } catch (err) {
-      setError(err.message || 'Could not submit report.');
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Modal title="Submit Test Report" onClose={onClose}>
-      <p style={{ fontSize: 12.5, color: T.muted, marginBottom: 16 }}>
-        {request.servicesRequested?.join(', ')} for {request.requester?.profile?.fullName || 'requester'}
-      </p>
+  const form = (
+    <div>
+      <p style={{ fontSize: 12.5, color: T.muted, marginBottom: 16 }}>{services} for {requester}</p>
       <div style={{ marginBottom: 12 }}>
         <label htmlFor="testingagencydashboard-f8" style={labelStyle}>REPORT FILE (PDF, JPG OR PNG, MAX 10 MB)</label>
         <input id="testingagencydashboard-f8" type="file" accept="application/pdf,image/jpeg,image/png" onChange={e => setFile(e.target.files?.[0] || null)} style={{ fontSize: 12 }} />
@@ -184,12 +206,46 @@ function SubmitReportModal({ request, onClose, onSubmitted }) {
         <label htmlFor="testingagencydashboard-f10" style={labelStyle}>NOTES / RESULTS (OPTIONAL)</label>
         <textarea id="testingagencydashboard-f10" style={{ ...inputStyle, minHeight: 60, resize: 'vertical' }} value={notes} onChange={e => setNotes(e.target.value)} />
       </div>
-      {error && <p style={{ color: T.danger, fontSize: 12, marginBottom: 12 }}>{error}</p>}
-      <div style={{ display: 'flex', gap: 10 }}>
-        <Btn variant="ghost" onClick={onClose} disabled={busy} style={{ flex: 1 }}>Cancel</Btn>
-        <Btn variant="primary" onClick={submit} disabled={busy} style={{ flex: 1 }}>{busy ? 'Submitting…' : 'Submit & Complete'}</Btn>
-      </div>
-    </Modal>
+    </div>
+  );
+
+  return (
+    <RequestFlowModal
+      title="Submit Test Report"
+      stepLabels={['Report', 'Review', 'Submitted']}
+      form={form}
+      validate={() => (!file && !alreadyUploaded && !reportUrl.trim() && !notes.trim() ? 'Attach the report file (PDF, JPG or PNG), or enter a link or result notes.' : null)}
+      reviewTitle="Check the report before submitting"
+      reviewNotice={`Submitting completes this test request and shares the report with ${requester}. Check the file and notes first.`}
+      summaryRows={[
+        { label: 'Request', value: request.requestNumber },
+        { label: 'Tests', value: services },
+        { label: 'Requester', value: requester },
+        { label: 'Report file', value: file ? file.name : alreadyUploaded ? `${request.reportFileName || 'Existing file'} (already attached)` : 'None' },
+        { label: 'Report link', value: reportUrl.trim() || undefined },
+        { label: 'Notes', value: notes.trim() || undefined },
+      ]}
+      confirmLabel="Submit & Complete"
+      confirmingLabel="Submitting…"
+      onSubmit={async () => {
+        // The file is stored permanently; the requester gets a fresh download link each time.
+        if (file) await apiUploadTestingReportFile(request.id, file);
+        return apiSubmitTestingReport(request.id, {
+          reportUrl: reportUrl.trim() || undefined,
+          reportData: notes ? { notes } : undefined,
+        });
+      }}
+      success={() => ({
+        icon: '📑',
+        title: 'Report submitted',
+        reference: request.requestNumber,
+        referenceLabel: 'Request',
+        message: `${requester} can now see the report. The request is marked completed.`,
+        status: 'Completed',
+      })}
+      onClose={onClose}
+      onDone={() => onSubmitted()}
+    />
   );
 }
 
@@ -211,9 +267,10 @@ export default function TestingAgencyDashboard() {
       .catch(() => {});
   };
 
-  const handleRespondToClarification = async (id, message, files) => {
-    await apiRespondToClarification(id, message, files);
+  const handleRespondToClarification = async (id, message, files, reqId) => {
+    const saved = await apiRespondToClarification(id, message, files, reqId);
     loadClarifications();
+    return saved;
   };
 
   const load = () => {
@@ -354,7 +411,7 @@ export default function TestingAgencyDashboard() {
       {reportRequest && (
         <SubmitReportModal
           request={reportRequest}
-          onClose={() => setReportRequest(null)}
+          onClose={() => { setReportRequest(null); load(); }}
           onSubmitted={() => { setReportRequest(null); load(); }}
         />
       )}

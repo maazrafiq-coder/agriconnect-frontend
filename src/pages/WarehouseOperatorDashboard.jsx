@@ -17,6 +17,7 @@ import {
 } from '../lib/api';
 import { Card, Btn, Tabs, Modal, LoadingState } from '../components/ui';
 import TextPromptModal from '../components/ui/TextPromptModal';
+import ConfirmDialog from '../components/ui/ConfirmDialog';
 import MediaManagerModal from '../components/MediaManager';
 import T from '../theme';
 import { RegisterWarehouseForm } from '../components/warehouse-operator/RegisterWarehouseForm';
@@ -29,6 +30,7 @@ import { OperatorOverviewTab } from '../components/warehouse-operator/OperatorOv
 import { OperatorListingTab } from '../components/warehouse-operator/OperatorListingTab';
 import { OperatorReviewTab } from '../components/warehouse-operator/OperatorReviewTab';
 
+import { useDeepLink } from '../lib/deeplink';
 // ─── MAIN DASHBOARD ──────────────────────────────────────────────────────────
 export default function WarehouseOperatorDashboard() {
   const navigate = useNavigate();
@@ -36,12 +38,17 @@ export default function WarehouseOperatorDashboard() {
   const [notFound, setNotFound] = useState(false);
   const [data, setData] = useState(null);
   const [tab, setTab] = useState('overview');
+  // Notification links: ?tab=invoices|gateout|review|overview&type=…&id=…
+  useDeepLink({ validTabs: ['overview', 'invoices', 'gateout', 'listing', 'review'], setTab });
   const [mediaOpen, setMediaOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [receiptBooking, setReceiptBooking] = useState(null);
   const [rejectBooking, setRejectBooking] = useState(null);
   const [actionError, setActionError] = useState('');
+  const [payDialog, setPayDialog] = useState(null);   // booking whose invoice payment is being confirmed
+  const [gateOutDialog, setGateOutDialog] = useState(null); // booking awaiting gate-out request confirmation
   const [askClearance, setAskClearance] = useState(null); // booking awaiting a clearance reference
+  const [acceptDialog, setAcceptDialog] = useState(null); // booking awaiting accept confirmation
   const [actioningId, setActioningId] = useState(null);
   const [selectedWarehouseId, setSelectedWarehouseId] = useState(null);
   const [addingAnother, setAddingAnother] = useState(false);
@@ -54,9 +61,10 @@ export default function WarehouseOperatorDashboard() {
       .catch(() => {});
   };
 
-  const handleRespondToClarification = async (id, message, files) => {
-    await apiRespondToClarification(id, message, files);
+  const handleRespondToClarification = async (id, message, files, reqId) => {
+    const saved = await apiRespondToClarification(id, message, files, reqId);
     loadClarifications();
+    return saved;
   };
 
   const load = (warehouseId) => {
@@ -76,18 +84,7 @@ export default function WarehouseOperatorDashboard() {
   useEffect(() => load(), []);
   useEffect(loadClarifications, []);
 
-  const handleAccept = async (booking) => {
-    setActionError('');
-    setActioningId(booking.id);
-    try {
-      await apiAcceptBooking(booking.id);
-      load();
-    } catch (err) {
-      setActionError(err.message || 'Could not accept this booking.');
-    } finally {
-      setActioningId(null);
-    }
-  };
+  const handleAccept = (booking) => setAcceptDialog(booking);
 
   const handleComplete = async (booking) => {
     setActionError('');
@@ -118,18 +115,11 @@ export default function WarehouseOperatorDashboard() {
   };
 
   const handleGenerateInvoice = (b) => runDocAction(b, () => apiGenerateInvoice(b.id), 'Could not generate the invoice.');
-  const handleConfirmPayment = (b) => {
-    const ref = window.prompt('Payment reference (bank transfer ID, cheque no., etc. — optional):', '');
-    if (ref === null) return; // cancelled
-    return runDocAction(b, () => apiConfirmInvoicePayment(b.invoice.id, ref || undefined), 'Could not confirm payment.');
-  };
+  const handleConfirmPayment = (b) => setPayDialog(b);
   // The bank sends the warehouse a release letter when the loan is cleared;
   // the operator records its reference here, which frees the goods.
   const handleRecordClearance = (b) => setAskClearance(b);
-  const handleRequestGateOut = (b) => {
-    if (!window.confirm('Request gate-out approval from the depositor for the full stored quantity?')) return;
-    return runDocAction(b, () => apiRequestGateOut(b.id), 'Could not request gate-out.');
-  };
+  const handleRequestGateOut = (b) => setGateOutDialog(b);
 
   // Documents are private — fetch a fresh short-lived signed URL right
   // when the operator clicks, then open it, rather than keeping a
@@ -243,6 +233,44 @@ export default function WarehouseOperatorDashboard() {
         </Modal>
       )}
 
+    {payDialog && (
+      <ConfirmDialog
+        title="Confirm payment received"
+        description="Confirm that the depositor's payment for this invoice has been received."
+        consequences={['The invoice is marked as paid.']}
+        confirmLabel="Confirm payment"
+        rows={[
+          { label: 'Booking', value: payDialog.bookingReference },
+          { label: 'Invoice', value: payDialog.invoice?.invoiceNumber },
+          { label: 'Amount', value: payDialog.invoice?.amount != null ? `₨${Number(payDialog.invoice.amount).toLocaleString()}` : (payDialog.totalCost != null ? `₨${Number(payDialog.totalCost).toLocaleString()}` : undefined) },
+        ]}
+        initialState={{ ref: '' }}
+        renderFields={(st, set) => (
+          <div>
+            <label htmlFor="pay-ref" style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 6 }}>Payment reference (optional)</label>
+            <input id="pay-ref" value={st.ref} onChange={e => set({ ref: e.target.value })} placeholder="Bank transfer ID, cheque no., etc." style={{ width: '100%', padding: '9px 12px', border: `1.5px solid ${T.border}`, borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }} />
+          </div>
+        )}
+        onConfirm={async ({ state }) => { await apiConfirmInvoicePayment(payDialog.invoice.id, state.ref.trim() || undefined); return state.ref.trim(); }}
+        success={(ref) => ({
+          title: 'Payment recorded',
+          message: 'The invoice is marked as paid. AgriConnect did not move any money - this records the payment you received.',
+          rows: [{ label: 'Invoice', value: payDialog.invoice?.invoiceNumber }, { label: 'Payment reference', value: ref || 'Not provided' }],
+        })}
+        onClose={() => { setPayDialog(null); load(); }}
+      />
+    )}
+    {gateOutDialog && (
+      <ConfirmDialog
+        title="Request gate-out approval"
+        description="Request gate-out approval from the depositor for the full stored quantity?"
+        consequences={['The depositor is asked to approve the release.', 'A Gate Out Pass is issued only after they approve.']}
+        confirmLabel="Send request"
+        onConfirm={async () => { await apiRequestGateOut(gateOutDialog.id); }}
+        success={() => ({ title: 'Gate-out request sent', message: 'The depositor has been asked to approve the release. A Gate Out Pass is issued only after they approve.', rows: [{ label: 'Booking', value: gateOutDialog.bookingReference }] })}
+        onClose={() => { setGateOutDialog(null); load(); }}
+      />
+    )}
     {askClearance && (
       <TextPromptModal
         title="Record bank clearance"
@@ -255,11 +283,29 @@ export default function WarehouseOperatorDashboard() {
       />
     )}
 
+      {acceptDialog && (
+        <ConfirmDialog
+          title={`Accept Booking - ${acceptDialog.bookingReference || ''}`}
+          description={`Accept ${acceptDialog.depositor?.profile?.fullName || 'the depositor'}'s request to store ${acceptDialog.quantityTons} tons of ${acceptDialog.commodity}?`}
+          rows={[
+            { label: 'Quantity', value: `${acceptDialog.quantityTons} tons` },
+            { label: 'Duration', value: acceptDialog.durationDays ? `${acceptDialog.durationDays} days` : undefined },
+            { label: 'Total cost', value: acceptDialog.totalCost != null ? `₨${Number(acceptDialog.totalCost).toLocaleString()}` : undefined },
+          ]}
+          consequences={['Capacity is reserved for the depositor.', 'The depositor is notified and brings the goods for receiving.']}
+          confirmLabel="Accept booking"
+          confirmingLabel="Accepting…"
+          onConfirm={() => apiAcceptBooking(acceptDialog.id)}
+          success={() => ({ title: 'Booking accepted', message: 'The depositor has been notified.', rows: [{ label: 'Booking', value: acceptDialog.bookingReference }] })}
+          onClose={() => { setAcceptDialog(null); load(); }}
+        />
+      )}
+
       {detailBooking && (
         <BookingDetailModal
           booking={detailBooking}
           onClose={() => setDetailBooking(null)}
-          onAccept={async (b) => { setDetailBooking(null); await handleAccept(b); }}
+          onAccept={(b) => { setDetailBooking(null); handleAccept(b); }}
           onDecline={(b) => { setDetailBooking(null); setRejectBooking(b); }}
         />
       )}
@@ -283,7 +329,7 @@ export default function WarehouseOperatorDashboard() {
       {receiptBooking && (
         <IssueReceiptModal
           booking={receiptBooking}
-          onClose={() => setReceiptBooking(null)}
+          onClose={() => { setReceiptBooking(null); load(); }}
           onIssued={() => { setReceiptBooking(null); load(); }}
         />
       )}
@@ -291,7 +337,7 @@ export default function WarehouseOperatorDashboard() {
       {rejectBooking && (
         <RejectBookingModal
           booking={rejectBooking}
-          onClose={() => setRejectBooking(null)}
+          onClose={() => { setRejectBooking(null); load(); }}
           onRejected={() => { setRejectBooking(null); load(); }}
         />
       )}

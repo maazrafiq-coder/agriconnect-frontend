@@ -15,6 +15,8 @@ import { useAuth } from '../../context/AuthContext';
 import TextPromptModal from '../ui/TextPromptModal';
 import ClarificationThread from '../ClarificationThread';
 import T from '../../theme';
+import useConfirm from '../ui/useConfirm';
+import { notify } from '../../lib/notify';
 
 const DOC_LABELS = {
   cnicFront: 'CNIC Front', cnicBack: 'CNIC Back',
@@ -93,11 +95,12 @@ export default function AdminUserDetailModal({ userId, onClose, onKycChanged }) 
       if (tab) tab.location.href = resolveApiFileUrl(url);
     } catch (e) {
       if (tab) tab.close();
-      alert(e.message || 'Could not open document — the link may need to be requested again.');
+      notify(e.message || 'Could not open document — the link may need to be requested again.');
     }
   };
 
-  const runAction = async (status, note) => {
+  const [confirmNode, confirmKyc] = useConfirm();
+  const runAction = async (status, note, rethrow = false) => {
     setBusy(true);
     try {
       await apiAdminUpdateKyc(userId, status, note);
@@ -110,15 +113,17 @@ export default function AdminUserDetailModal({ userId, onClose, onKycChanged }) 
       // reviewing (e.g. re-checking documents) after either of those.
       if (status === 'APPROVED') onClose?.();
     } catch (e) {
-      alert(e.message || 'Action failed');
+      if (rethrow) throw e;
+      notify(e.message || 'Action failed');
     } finally {
       setBusy(false);
     }
   };
 
-  const handleReviewerRespond = async (clarificationId, message, files) => {
-    await apiRespondToClarification(clarificationId, message, files);
+  const handleReviewerRespond = async (clarificationId, message, files, reqId) => {
+    const saved = await apiRespondToClarification(clarificationId, message, files, reqId);
     loadClarifications();
+    return saved;
   };
 
   const handleResolve = async (clarificationId) => {
@@ -126,12 +131,13 @@ export default function AdminUserDetailModal({ userId, onClose, onKycChanged }) 
       await apiResolveClarification(clarificationId);
       loadClarifications();
     } catch (e) {
-      alert(e.message || 'Could not resolve this request.');
+      notify(e.message || 'Could not resolve this request.');
     }
   };
 
   return (
     <Modal title="Complete Profile" onClose={onClose} width={720}>
+      {confirmNode}
       {error && <div style={{ color: T.danger, fontSize: 13 }}>⚠ {error}</div>}
       {!detail && !error && <LoadingState />}
       {detail && (
@@ -287,7 +293,7 @@ export default function AdminUserDetailModal({ userId, onClose, onKycChanged }) 
                     await apiModeratorRecommend(userId);
                     setDetail(d => ({ ...d, kycStatus: 'RECOMMENDED' }));
                     onKycChanged?.(userId, 'RECOMMENDED');
-                  } catch (e) { alert(e.message || 'Action failed'); } finally { setBusy(false); }
+                  } catch (e) { notify(e.message || 'Action failed'); } finally { setBusy(false); }
                 }}>{detail.kycStatus === 'RECOMMENDED' ? '👍 Recommended' : '👍 Recommend for approval'}</Btn>
                 <Btn variant="secondary" disabled={busy} onClick={() => setAsk({
                   title: 'Request more information', label: 'What additional information is needed?', submitLabel: 'Send request',
@@ -297,7 +303,12 @@ export default function AdminUserDetailModal({ userId, onClose, onKycChanged }) 
               </div>
             ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 8 }}>
-              <Btn variant="primary" disabled={busy || detail.kycStatus === 'APPROVED'} onClick={() => runAction('APPROVED')}>
+              <Btn variant="primary" disabled={busy || detail.kycStatus === 'APPROVED'} onClick={() => confirmKyc({
+                title: 'Approve account', confirmLabel: 'Approve',
+                description: `Approve ${detail.fullName || detail.profile?.fullName || 'this user'}'s KYC and account?`,
+                consequences: ['The user can log in and use the platform.', 'They are notified.'],
+                run: () => runAction('APPROVED', undefined, true),
+              })}>
                 {detail.kycStatus === 'APPROVED' ? '✅ Approved' : '✅ Approve'}
               </Btn>
               <Btn variant="secondary" disabled={busy} onClick={() => setAsk({

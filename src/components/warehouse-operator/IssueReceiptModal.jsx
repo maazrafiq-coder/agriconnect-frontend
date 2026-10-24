@@ -1,43 +1,30 @@
 import { useState } from 'react';
 import { apiIssueReceipt } from '../../lib/api';
-import { Btn, Modal } from '../ui';
+import RequestFlowModal from '../ui/RequestFlowModal';
+import useRequestId from '../../lib/useRequestId';
 import T from '../../theme';
 import { inputStyle, labelStyle } from './shared';
 
 // ─── ISSUE RECEIPT MODAL ────────────────────────────────────────────────────
+// details -> review -> confirmation. Issuing a receipt starts the storage period
+// and gives the depositor a document they can borrow against, so it is reviewed.
 export function IssueReceiptModal({ booking, onClose, onIssued }) {
   const [actualQuantityTons, setQty] = useState(booking.quantityTons || '');
   const [moisture, setMoisture] = useState('');
   const [purity, setPurity] = useState('');
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
+  const requestKey = useRequestId(JSON.stringify([booking.id, actualQuantityTons, moisture, purity]));
+  const depositor = booking.depositor?.profile?.fullName || 'the depositor';
 
-  const submit = async () => {
-    setError('');
-    if (!actualQuantityTons) return setError('Enter the actual stored quantity.');
-    setBusy(true);
-    try {
-      const qualityMetrics = {};
-      if (moisture) qualityMetrics.moisture = Number(moisture);
-      if (purity) qualityMetrics.purity = Number(purity);
-      await apiIssueReceipt(booking.id, { actualQuantityTons: Number(actualQuantityTons), qualityMetrics });
-      onIssued();
-    } catch (err) {
-      setError(err.message || 'Could not issue receipt.');
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Modal title="Issue Digital Warehouse Receipt" onClose={onClose}>
+  const form = (
+    <div>
       <p style={{ fontSize: 12.5, color: T.muted, marginBottom: 16 }}>
-        For {booking.depositor?.profile?.fullName || 'depositor'} — {booking.commodity}
+        For {depositor} - {booking.commodity}
       </p>
       <div style={{ marginBottom: 12 }}>
         <label htmlFor="issuereceiptmodal-f1" style={labelStyle}>ACTUAL QUANTITY STORED (TONS)</label>
         <input id="issuereceiptmodal-f1" type="number" min="0.1" step="0.1" style={inputStyle} value={actualQuantityTons} onChange={e => setQty(e.target.value)} />
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))', gap: 10, marginBottom: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 10, marginBottom: 16 }}>
         <div>
           <label htmlFor="issuereceiptmodal-f2" style={labelStyle}>MOISTURE % (OPTIONAL)</label>
           <input id="issuereceiptmodal-f2" type="number" step="0.1" style={inputStyle} value={moisture} onChange={e => setMoisture(e.target.value)} />
@@ -47,11 +34,49 @@ export function IssueReceiptModal({ booking, onClose, onIssued }) {
           <input id="issuereceiptmodal-f3" type="number" step="0.1" style={inputStyle} value={purity} onChange={e => setPurity(e.target.value)} />
         </div>
       </div>
-      {error && <p style={{ color: T.danger, fontSize: 12, marginBottom: 12 }}>{error}</p>}
-      <div style={{ display: 'flex', gap: 10 }}>
-        <Btn variant="ghost" onClick={onClose} disabled={busy} style={{ flex: 1 }}>Cancel</Btn>
-        <Btn variant="primary" onClick={submit} disabled={busy} style={{ flex: 1 }}>{busy ? 'Issuing…' : 'Issue Receipt'}</Btn>
-      </div>
-    </Modal>
+    </div>
+  );
+
+  return (
+    <RequestFlowModal
+      title="Issue Digital Warehouse Receipt"
+      stepLabels={['Details', 'Review', 'Issued']}
+      form={form}
+      canReview
+      validate={() => (!(Number(actualQuantityTons) > 0) ? 'Enter the actual stored quantity.' : null)}
+      reviewTitle="Check the receipt before issuing"
+      reviewNotice="Issuing the receipt records the goods as received and starts the storage period. The depositor can then use the receipt, including as loan collateral. Check the quantity and quality figures - they are shown on the receipt."
+      summaryRows={[
+        { label: 'Booking', value: booking.bookingReference },
+        { label: 'Depositor', value: depositor },
+        { label: 'Commodity', value: booking.commodity },
+        { label: 'Booked quantity', value: booking.quantityTons != null ? `${booking.quantityTons} tons` : undefined },
+        { label: 'Actual quantity', value: `${Number(actualQuantityTons)} tons`, accent: true },
+        { label: 'Moisture', value: moisture ? `${moisture}%` : 'Not recorded' },
+        { label: 'Purity', value: purity ? `${purity}%` : 'Not recorded' },
+      ]}
+      confirmLabel="Issue Receipt"
+      confirmingLabel="Issuing…"
+      onSubmit={() => {
+        const qualityMetrics = {};
+        if (moisture) qualityMetrics.moisture = Number(moisture);
+        if (purity) qualityMetrics.purity = Number(purity);
+        return apiIssueReceipt(booking.id, { actualQuantityTons: Number(actualQuantityTons), qualityMetrics }, requestKey());
+      }}
+      success={(res) => ({
+        icon: '📄',
+        title: 'Receipt issued',
+        reference: res?.receiptNumber || res?.receipt?.receiptNumber,
+        referenceLabel: 'Receipt',
+        message: `${depositor} can now see the receipt in their account.`,
+        rows: [
+          { label: 'Booking', value: booking.bookingReference },
+          { label: 'Actual quantity', value: `${Number(actualQuantityTons)} tons` },
+        ],
+        status: 'Issued',
+      })}
+      onClose={onClose}
+      onDone={() => onIssued?.()}
+    />
   );
 }

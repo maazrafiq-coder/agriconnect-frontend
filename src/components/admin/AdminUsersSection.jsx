@@ -2,11 +2,15 @@ import { apiAdminSetUserActive } from '../../lib/api';
 import { Card, Btn } from '../ui';
 import T from '../../theme';
 import { Pager } from './Pager';
+import useConfirm from '../ui/useConfirm';
+import { notify } from '../../lib/notify';
 
 // ─── AdminUsersSection ───
 export function AdminUsersSection({ userSearch, setUserSearch, kycFilter, setKycFilter, users, setUsers, usersMeta, userPage, setUserPage, usersLoading, setKycModal, setCreateUserModal, setResetPasswordModal, loadAll }) {
+  const [confirmNode, confirm] = useConfirm();
   return (
     <div>
+      {confirmNode}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <div>
           <h1 style={{ fontSize: 20, fontWeight: 900, color: T.green, margin: '0 0 4px' }}>👥 User Management</h1>
@@ -71,12 +75,20 @@ export function AdminUsersSection({ userSearch, setUserSearch, kycFilter, setKyc
                     {u.kycStatus === 'SUBMITTED' && (
                       <Btn variant="primary" size="sm" onClick={() => setKycModal(u)}>Review KYC</Btn>
                     )}
-                    <Btn variant={u.isActive ? 'danger' : 'secondary'} size="sm" onClick={async () => {
-                      try {
+                    <Btn variant={u.isActive ? 'danger' : 'secondary'} size="sm" onClick={() => confirm({
+                      title: u.isActive ? `Suspend ${u.fullName || u.email || u.phoneNumber || 'user'}` : `Reactivate ${u.fullName || u.email || u.phoneNumber || 'user'}`,
+                      danger: u.isActive,
+                      confirmLabel: u.isActive ? 'Suspend account' : 'Reactivate account',
+                      description: u.isActive ? 'Suspend this account?' : 'Reactivate this account?',
+                      consequences: u.isActive
+                        ? ['They can no longer log in or use the platform.', 'Their open listings and orders are not deleted.', 'You can reactivate the account at any time.']
+                        : ['They can log in and trade again.'],
+                      run: async () => {
                         await apiAdminSetUserActive(u.id, !u.isActive);
                         setUsers(prev => prev.map(x => x.id === u.id ? { ...x, isActive: !x.isActive } : x));
-                      } catch (e) { alert(e.message); }
-                    }}>{u.isActive ? 'Suspend' : 'Activate'}</Btn>
+                      },
+                      successTitle: u.isActive ? 'Account suspended' : 'Account reactivated',
+                    })}>{u.isActive ? 'Suspend' : 'Activate'}</Btn>
                     <Btn variant="ghost" size="sm" onClick={() => setResetPasswordModal(u)}>Reset PW</Btn>
                   </div>
                 </td>

@@ -17,6 +17,8 @@ import { useAuth } from '../../context/AuthContext';
 import TextPromptModal from '../ui/TextPromptModal';
 import ClarificationThread from '../ClarificationThread';
 import T from '../../theme';
+import useConfirm from '../ui/useConfirm';
+import { notify } from '../../lib/notify';
 
 const DOC_LABELS = {
   cnicFront: 'CNIC Front', cnicBack: 'CNIC Back',
@@ -92,7 +94,7 @@ export default function AdminListingDetailModal({ type, id, onClose, onOpenUser,
       if (tab) tab.location.href = resolveApiFileUrl(url);
     } catch (e) {
       if (tab) tab.close();
-      alert(e.message || 'Could not open document.');
+      notify(e.message || 'Could not open document.');
     }
   };
 
@@ -126,6 +128,7 @@ export default function AdminListingDetailModal({ type, id, onClose, onOpenUser,
   // close this window and find the listing in the table to act on it.
   const isProduct = type === 'product';
   const awaitingDecision = detail && (isProduct ? detail.entity?.status === 'PENDING_REVIEW' : detail.entity?.isVerified === false);
+  const [confirmNode, confirmApprove] = useConfirm();
   const approve = async () => {
     setDeciding(true);
     try {
@@ -135,7 +138,7 @@ export default function AdminListingDetailModal({ type, id, onClose, onOpenUser,
       else if (type === 'transport') await apiAdminVerifyTransport(id, true);
       setDetail(d => ({ ...d, entity: { ...d.entity, ...(isProduct ? { status: 'ACTIVE' } : { isVerified: true }) } }));
       onDecision?.();
-    } catch (e) { alert(e.message || 'Could not approve'); } finally { setDeciding(false); }
+    } finally { setDeciding(false); }
   };
   const rejectListing = () => setAsk({
     title: 'Reject listing', label: 'Reason (shown to the seller)', submitLabel: 'Reject listing',
@@ -156,6 +159,7 @@ export default function AdminListingDetailModal({ type, id, onClose, onOpenUser,
   return (
     <Modal title={`${TYPE_TITLES[type] || 'Listing'} — Complete Details`} onClose={onClose} width={760}>
       {error && <div style={{ color: T.danger, fontSize: 13 }}>⚠ {error}</div>}
+      {confirmNode}
       {!detail && !error && <LoadingState />}
       {detail && (
         <div>
@@ -171,7 +175,12 @@ export default function AdminListingDetailModal({ type, id, onClose, onOpenUser,
           {canDecide && awaitingDecision && (
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16, padding: 12, background: '#FFFBEB', border: '1px solid #FDE68A', borderRadius: 10, alignItems: 'center' }}>
               <span style={{ fontSize: 12, color: '#92400E', fontWeight: 700, flex: '1 1 200px' }}>This {TYPE_TITLES[type]?.toLowerCase() || 'listing'} is waiting for a decision.</span>
-              <Btn variant="primary" size="sm" disabled={deciding} onClick={approve}>✅ Approve</Btn>
+              <Btn variant="primary" size="sm" disabled={deciding} onClick={() => confirmApprove({
+                title: `Approve ${TYPE_TITLES[type]?.toLowerCase() || 'listing'}`, confirmLabel: 'Approve',
+                description: `Approve ${detail.entity?.name || detail.entity?.companyName || 'this listing'}?`,
+                consequences: [isProduct ? 'The listing becomes visible to buyers.' : 'It is marked verified and becomes visible to customers.', 'The owner is notified.'],
+                run: approve, successTitle: 'Approved',
+              })}>✅ Approve</Btn>
               {isProduct && <Btn variant="danger" size="sm" disabled={deciding} onClick={rejectListing}>❌ Reject</Btn>}
             </div>
           )}
@@ -315,8 +324,8 @@ export default function AdminListingDetailModal({ type, id, onClose, onOpenUser,
                 <ClarificationThread
                   clarifications={clarifications}
                   viewerRole="reviewer"
-                  onRespond={async (cid, message, files) => { await apiRespondToClarification(cid, message, files); loadClarifications(clar); }}
-                  onResolve={async (cid) => { try { await apiResolveClarification(cid); loadClarifications(clar); } catch (e) { alert(e.message); } }}
+                  onRespond={async (cid, message, files, reqId) => { const saved = await apiRespondToClarification(cid, message, files, reqId); loadClarifications(clar); return saved; }}
+                  onResolve={async (cid) => { try { await apiResolveClarification(cid); loadClarifications(clar); } catch (e) { notify(e.message); } }}
                 />
               )}
               {!clarifications.length && <Empty>No information requests yet.</Empty>}

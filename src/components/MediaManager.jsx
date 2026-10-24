@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Modal, Btn, Badge } from './ui';
+import ConfirmDialog from './ui/ConfirmDialog';
 import T from '../theme';
 import {
   apiGetProduct, resolveMediaUrl,
@@ -36,6 +37,7 @@ export default function MediaManagerModal({
 }) {
   const [media, setMedia] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [removeTarget, setRemoveTarget] = useState(null);
   const [uploadingPhotos, setUploadingPhotos] = useState(false);
   const [uploadingDocs, setUploadingDocs] = useState(false);
   const [error, setError] = useState('');
@@ -108,20 +110,24 @@ export default function MediaManagerModal({
     }
   };
 
-  const removeMedia = async (m) => {
-    if (!canDelete) return;
-    if (!window.confirm('Remove this file? This cannot be undone.')) return;
+  const removeMedia = (m) => { if (canDelete) setRemoveTarget(m); };
+  const doRemove = async (m) => {
     setError('');
-    try {
-      await apiDeleteListingMedia(m.id);
-      setMedia(prev => prev.filter(x => x.id !== m.id));
-    } catch (e) {
-      setError(e.message || 'Could not remove file.');
-    }
+    await apiDeleteListingMedia(m.id);
+    setMedia(prev => prev.filter(x => x.id !== m.id));
   };
 
   return (
     <Modal title={title} onClose={onClose} width={620}>
+      {removeTarget && (
+        <ConfirmDialog
+          title="Remove file" danger confirmLabel="Remove file"
+          description="Remove this file from the listing?"
+          consequences={['The file is deleted permanently.']}
+          onConfirm={() => doRemove(removeTarget)}
+          onClose={() => setRemoveTarget(null)}
+        />
+      )}
       {loading ? (
         <p style={{ fontSize: 13, color: T.muted }}>Loading…</p>
       ) : (

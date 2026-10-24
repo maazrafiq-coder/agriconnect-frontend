@@ -28,6 +28,8 @@ import { AdminMarketplaceSection } from '../components/admin/AdminMarketplaceSec
 import { AdminPaymentsSection } from '../components/admin/AdminPaymentsSection';
 import { AdminLogisticsSection } from '../components/admin/AdminLogisticsSection';
 
+import { useDeepLink } from '../lib/deeplink';
+import { notify } from '../lib/notify';
 // ─── SIDEBAR NAV ──────────────────────────────────────────────────────────────
 const NAV_SECTIONS = [
   { id: 'dashboard',   icon: '📊', label: 'Dashboard' },
@@ -74,6 +76,13 @@ export default function AdminDashboard() {
 
   // Modals
   const [kycModal, setKycModal] = useState(null);
+  // Notification links: ?tab=users|liens…&type=kyc&id=<userId> opens that section,
+  // and for a KYC conversation opens the person's review dialog directly.
+  const adminSections = isMod ? MODERATOR_SECTIONS : ['dashboard', 'users', 'marketplace', 'payments', 'logistics', 'liens', 'settings', 'security'];
+  const deepLink = useDeepLink({ validTabs: adminSections, setTab: setSection });
+  useEffect(() => {
+    if (deepLink.params.type === 'kyc' && deepLink.params.id) setKycModal({ id: deepLink.params.id });
+  }, [deepLink.params.type, deepLink.params.id]);
   const [ask, setAsk] = useState(null); // text-prompt dialog config
   const [listingDetail, setListingDetail] = useState(null); // { type, id }
   const [createUserModal, setCreateUserModal] = useState(false);
@@ -295,7 +304,7 @@ export default function AdminDashboard() {
               const result = await apiAdminResetUserPassword(resetPasswordModal.id);
               setResetPasswordModal(null);
               setTempPasswordModal({ user: resetPasswordModal, temporaryPassword: result.temporaryPassword });
-            } catch (e) { alert(e.message); }
+            } catch (e) { notify(e.message); }
           }}>Generate New Password →</Btn>
         </Modal>
       )}

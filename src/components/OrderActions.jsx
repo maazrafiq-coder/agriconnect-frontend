@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Btn } from './ui';
 import TextPromptModal from './ui/TextPromptModal';
+import ConfirmDialog from './ui/ConfirmDialog';
 import { apiUpdateOrderStatus } from '../lib/api';
 import T from '../theme';
 
@@ -35,7 +36,8 @@ const REASON_COPY = {
 // order: adapted order (lowercase .status, ._raw.id); role: 'seller' | 'buyer'
 export default function OrderActions({ order, role, onChanged }) {
   const [prompt, setPrompt] = useState(null); // target status needing a reason
-  const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(null); // [status, label]
+  const busy = false;
   const [error, setError] = useState('');
 
   const orderId = order._raw?.id || order.id;
@@ -51,14 +53,11 @@ export default function OrderActions({ order, role, onChanged }) {
     onChanged?.();
   };
 
-  const click = async ([status, , , needsReason]) => {
+  const a_label = (st) => actions.find(a => a[0] === st)?.[1] || 'Confirm';
+  const click = ([status, , , needsReason]) => {
     setError('');
     if (needsReason) { setPrompt(status); return; }
-    if (!window.confirm(CONFIRM[status] || 'Are you sure?')) return;
-    setBusy(true);
-    try { await run(status); }
-    catch (e) { setError(e?.message || 'Could not update the order'); }
-    finally { setBusy(false); }
+    setConfirming([status, a_label(status)]);
   };
 
   return (
@@ -69,6 +68,15 @@ export default function OrderActions({ order, role, onChanged }) {
         ))}
       </div>
       {error && <div style={{ fontSize: 11, color: T.danger, maxWidth: 260, textAlign: 'right' }}>{error}</div>}
+      {confirming && (
+        <ConfirmDialog
+          title={confirming[1]}
+          description={CONFIRM[confirming[0]]}
+          confirmLabel={confirming[1]}
+          onConfirm={() => run(confirming[0])}
+          onClose={() => setConfirming(null)}
+        />
+      )}
       {prompt && (
         <TextPromptModal
           title={REASON_COPY[prompt].title}

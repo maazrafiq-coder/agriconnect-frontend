@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { apiGetMe, apiLogin, apiLogout, setAccessToken } from '../lib/api';
 import { adaptUser } from '../lib/adapters';
 
@@ -47,6 +47,27 @@ export function AuthProvider({ children }) {
 
   const loginWithUser = (adaptedUser) => setUser(adaptedUser);
 
+  // Re-read the account from the server. An admin approving (or asking for
+  // more information from) a signed-in person takes effect without them
+  // logging in again.
+  const refreshUser = useCallback(async () => {
+    try {
+      const me = await apiGetMe();
+      setUser(prev => (prev ? adaptUser(me) : prev));
+    } catch { /* keep the current view; the next poll retries */ }
+  }, []);
+
+  // While an account is not approved, check again every minute and whenever the
+  // tab regains focus, so the banner and locked actions clear on approval.
+  const needsPolling = !!user && user.kycStatus !== 'APPROVED' && !user.verified;
+  useEffect(() => {
+    if (!needsPolling) return undefined;
+    const t = setInterval(refreshUser, 60000);
+    const onFocus = () => refreshUser();
+    window.addEventListener('focus', onFocus);
+    return () => { clearInterval(t); window.removeEventListener('focus', onFocus); };
+  }, [needsPolling, refreshUser]);
+
   const logout = async () => {
     await apiLogout();
     setUser(null);
@@ -59,7 +80,7 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, loading, login, loginWithUser, logout, authModal, openLogin, openRegister, openForgot, closeModal }}
+      value={{ user, loading, login, loginWithUser, refreshUser, logout, authModal, openLogin, openRegister, openForgot, closeModal }}
     >
       {children}
     </AuthContext.Provider>

@@ -265,3 +265,17 @@ export const EmptyState = ({ icon = '📭', title = 'Nothing here yet', subtitle
     {subtitle && <div style={{ fontSize: 12 }}>{subtitle}</div>}
   </div>
 );
+
+// One label/value line in a review or success summary. Shared by every
+// request/confirmation flow (the warehouse components re-export this).
+export const InfoRow = ({ label, value, accent }) => (
+  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '8px 0', borderBottom: `1px solid ${T.border}` }}>
+    <span style={{ fontSize: 12, color: T.muted }}>{label}</span>
+    <span style={{ fontSize: 12, fontWeight: 700, color: accent || T.text, textAlign: 'right', overflowWrap: 'anywhere' }}>{value}</span>
+  </div>
+);
+
+// Review / confirmation building blocks (they import Modal/Btn from this file,
+// so they live in their own modules and are re-exported here for convenience).
+export { default as RequestFlowModal, FlowProgress, FlowError, SummaryRows } from './RequestFlowModal';
+export { default as ConfirmDialog } from './ConfirmDialog';

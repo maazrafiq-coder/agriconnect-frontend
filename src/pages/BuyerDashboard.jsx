@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { apiGetOrders, apiGetMyTestingRequests, apiGetMyTransportRequests, apiGetTestingReportFile, apiGetSavedProducts, apiGetSentOffers, apiAcceptCounter, apiWithdrawOffer } from '../lib/api';
+import { apiGetOrders, apiGetMyTestingRequests, apiGetMyTransportRequests, apiGetTestingReportFile, apiGetSavedProducts, apiGetSentOffers, apiAcceptCounter, apiWithdrawOffer, apiSaleGetMyInvoices } from '../lib/api';
 import { adaptOrders, adaptProducts, adaptTestingRequests, adaptTransportRequests } from '../lib/adapters';
 import TransportRequestCard from '../components/TransportRequestCard';
 import { useNavigate } from 'react-router-dom';
@@ -8,10 +8,19 @@ import { Card, Btn, Tabs, LoadingState, ErrorState, EmptyState } from '../compon
 import ProductCard from '../components/ProductCard';
 import OfferThread from '../components/OfferThread';
 import OrderActions from '../components/OrderActions';
+import ConfirmDialog from '../components/ui/ConfirmDialog';
+import AcceptRoundDialog from '../components/offers/AcceptRoundDialog';
+import ProposeRoundFlow from '../components/offers/ProposeRoundFlow';
+import NegotiationTimeline from '../components/NegotiationTimeline';
+import OrderTermsAndInvoices from '../components/invoices/OrderTermsAndInvoices';
+import { currentRound, turnOf } from '../lib/offerRounds';
+import { describeTerms, money } from '../lib/paymentTerms';
 import PortalWarehouseTab from '../components/PortalWarehouseTab';
 import usePortalProfile from '../lib/usePortalProfile';
 import T from '../theme';
 import { clickable } from '../lib/a11y';
+import { useDeepLink } from '../lib/deeplink';
+import DeepLinkNotice from '../components/DeepLinkNotice';
 
 export default function BuyerDashboard() {
   const navigate = useNavigate();
@@ -29,29 +38,27 @@ export default function BuyerDashboard() {
   const [sentOffers, setSentOffers] = useState([]);
   const [activeOffer, setActiveOffer] = useState(null);
   const [offerBusy, setOfferBusy] = useState(null);
+  const [offerConfirm, setOfferConfirm] = useState(null); // { kind: 'decline'|'withdraw', o }
+  const [acceptingOffer, setAcceptingOffer] = useState(null);  // raw offer being accepted
+  const [counteringOffer, setCounteringOffer] = useState(null); // raw offer being countered back
+  const [historyOffer, setHistoryOffer] = useState(null);
   const [offerError, setOfferError] = useState('');
+  const [offersLoaded, setOffersLoaded] = useState(false);
+  const [invoices, setInvoices] = useState([]);
+  const [invoicesLoaded, setInvoicesLoaded] = useState(false);
 
   const loadOffers = () =>
-    apiGetSentOffers().then(d => setSentOffers(Array.isArray(d) ? d : [])).catch(() => setSentOffers([]));
+    apiGetSentOffers().then(d => setSentOffers(Array.isArray(d) ? d : [])).catch(() => setSentOffers([])).finally(() => setOffersLoaded(true));
+  const loadInvoices = () =>
+    apiSaleGetMyInvoices().then(d => setInvoices(Array.isArray(d) ? d : [])).catch(() => setInvoices([])).finally(() => setInvoicesLoaded(true));
 
-  const acceptCounter = async (o) => {
-    const total = Number(o.counterPrice) * Number(o.quantity);
-    if (!window.confirm(`Accept the seller's counter of ₨${Number(o.counterPrice).toLocaleString()} per ${o.product?.unit || 'unit'}?\n\nThis creates an order for ${o.quantity} ${o.product?.unit || ''} — total ₨${total.toLocaleString()}.`)) return;
+  const withdrawOffer = (o, declining) => setOfferConfirm({ kind: declining ? 'decline' : 'withdraw', o });
+  const doOfferAction = async ({ o }) => {
     setOfferBusy(o.id); setOfferError('');
     try {
-      await apiAcceptCounter(o.id);
-      await Promise.all([loadOffers(), loadOrders()]);
-      setTab('orders');
-    } catch (e) { setOfferError(e?.message || 'Could not accept the counter-offer'); }
-    finally { setOfferBusy(null); }
-  };
-
-  const withdrawOffer = async (o, declining) => {
-    if (!window.confirm(declining ? 'Decline the seller\'s counter-offer?' : 'Withdraw this offer?')) return;
-    setOfferBusy(o.id); setOfferError('');
-    try { await apiWithdrawOffer(o.id); await loadOffers(); }
-    catch (e) { setOfferError(e?.message || 'Could not update the offer'); }
-    finally { setOfferBusy(null); }
+      await apiWithdrawOffer(o.id);
+      await loadOffers();
+    } finally { setOfferBusy(null); }
   };
 
   const loadOrders = () => {
@@ -98,11 +105,32 @@ export default function BuyerDashboard() {
     loadTransport();
 
     loadOffers();
+    loadInvoices();
 
     apiGetSavedProducts()
       .then(data => setSavedProducts(adaptProducts((data || []).map(s => s.product))))
       .catch(() => setSavedProducts([]));
   }, []);
+
+  // Notification links: ?tab=offers&type=offer&id=… opens that tab and highlights the record.
+  const deepLink = useDeepLink({
+    validTabs: ['overview', 'saved', 'offers', 'orders', 'messages', 'testing', 'transport', 'warehouse'],
+    setTab,
+    lookup: {
+      offer: { ready: offersLoaded, ids: sentOffers.map(o => o.id) },
+      order: { ready: ordersState !== 'loading', ids: ORDERS.map(o => o.id) },
+      invoice: { ready: invoicesLoaded, ids: invoices.map(i => i.id) },
+      testing: { ready: testingState !== 'loading', ids: TESTING.map(t => t.id) },
+      transport: { ready: transportState !== 'loading', ids: TRANSPORT.map(r => r.id) },
+    },
+  });
+
+  // An invoice notification opens the order that holds it.
+  useEffect(() => {
+    if (deepLink.params.type !== 'invoice') return;
+    const inv = invoices.find(i => i.id === deepLink.params.id);
+    if (inv) setOpenOrder(inv.orderId);
+  }, [invoices, deepLink.params.type, deepLink.params.id]);
 
   const activeOrderCount = ORDERS.filter(o => !['delivered', 'completed', 'cancelled', 'rejected'].includes(o.status)).length;
   const totalSpent = ORDERS.filter(o => o.status !== 'cancelled').reduce((sum, o) => sum + Number(o._raw?.totalAmount || 0), 0);
@@ -124,6 +152,7 @@ export default function BuyerDashboard() {
         </div>
       </div>
 
+      <DeepLinkNotice notice={deepLink.notice} onDismiss={deepLink.dismiss} />
       <Tabs
         tabs={[['overview','📊 Overview'],['saved',`❤️ Saved${savedProducts.length ? ` (${savedProducts.length})` : ''}`],['offers',`💬 Offers${sentOffers.some(o => o.status === 'COUNTERED') ? ' •' : ''}`],['orders','📋 Orders'],['messages','✉️ Messages'],['testing','🧪 Testing'],['transport','🚛 Transport'],['warehouse','🏪 Warehouse']]}
         active={tab} onChange={setTab} color="#2563EB"
@@ -207,34 +236,47 @@ export default function BuyerDashboard() {
           {sentOffers.map(o => {
             const st = String(o.status).toLowerCase();
             const unit = o.product?.unit || '';
+            const cur = currentRound(o);
+            const turn = turnOf(o);
+            const multi = (o.rounds || []).length > 1;
             return (
-              <div key={o.id} style={{ padding: '14px 0', borderBottom: `1px solid ${T.border}` }}>
+              <div key={o.id} data-focus-id={o.id} style={{ padding: '14px 0', borderBottom: `1px solid ${T.border}` }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 10 }}>
                   <div>
                     <div style={{ fontWeight: 700, fontSize: 14 }}>{o.product?.name}</div>
                     <div style={{ fontSize: 12, color: T.muted, margin: '3px 0' }}>
-                      {o.product?.seller?.profile?.fullName || 'Seller'} · {o.quantity} {unit} · You offered <strong style={{ color: T.goldText }}>₨{Number(o.offeredPrice).toLocaleString()}</strong> (asking ₨{Number(o.product?.askingPrice || 0).toLocaleString()})
+                      {o.product?.seller?.profile?.fullName || 'Seller'} · asking {money(o.product?.askingPrice)} per {unit}
                     </div>
-                    {st === 'countered' && o.counterPrice != null && (
-                      <div style={{ fontSize: 12, color: T.warnText, marginTop: 4, fontWeight: 700 }}>
-                        Seller's counter: ₨{Number(o.counterPrice).toLocaleString()} per {unit} · total ₨{(Number(o.counterPrice) * Number(o.quantity)).toLocaleString()}
-                        {o.counterMessage && <span style={{ fontWeight: 400, fontStyle: 'italic' }}> — "{o.counterMessage}"</span>}
+                    {cur ? (
+                      <div style={{ fontSize: 12, marginTop: 4 }}>
+                        <span style={{ fontWeight: 700, color: turn === 'BUYER' ? T.warnText : undefined }}>{cur.proposerRole === 'SELLER' ? "Seller's counter" : 'You proposed'}:</span>{' '}
+                        {money(cur.price)} per {unit} × {cur.quantity} = <strong>{money(Number(cur.price) * cur.quantity)}</strong>
+                        <div style={{ color: T.muted, fontSize: 11 }}>{describeTerms(cur.paymentTerms)}</div>
+                        {cur.message && <div style={{ fontStyle: 'italic', marginTop: 3 }}>"{cur.message}"</div>}
                       </div>
+                    ) : (
+                      <div style={{ fontSize: 12, marginTop: 4 }}>{o.quantity} {unit} · You offered <strong style={{ color: T.goldText }}>{money(o.offeredPrice)}</strong></div>
                     )}
                     {st === 'rejected' && o.rejectionReason && <div style={{ fontSize: 11, color: T.danger, marginTop: 4 }}>Declined: {o.rejectionReason}</div>}
                     {['pending', 'countered'].includes(st) && o.expiresAt && (
                       <div style={{ fontSize: 11, color: T.muted, marginTop: 4 }}>Expires {new Date(o.expiresAt).toLocaleString()}</div>
                     )}
+                    {(o.rounds || []).length > 0 && (
+                      <button type="button" onClick={() => setHistoryOffer(historyOffer === o.id ? null : o.id)} style={{ background: 'none', border: 'none', padding: 0, marginTop: 6, color: T.info, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>
+                        {historyOffer === o.id ? 'Hide negotiation history' : `Negotiation history (${o.rounds.length} round${o.rounds.length > 1 ? 's' : ''})`}
+                      </button>
+                    )}
                   </div>
                   <div style={{ display: 'flex', gap: 7, alignItems: 'center', flexWrap: 'wrap' }}>
                     <span style={{ background: SC[st]?.bg, color: SC[st]?.c, padding: '3px 9px', borderRadius: 10, fontSize: 11, fontWeight: 700 }}>{SC[st]?.l || st}</span>
-                    {st === 'countered' && (
+                    {turn === 'BUYER' && (
                       <>
-                        <Btn variant="primary" size="sm" disabled={offerBusy === o.id} onClick={() => acceptCounter(o)}>Accept counter</Btn>
+                        <Btn variant="primary" size="sm" disabled={offerBusy === o.id} onClick={() => setAcceptingOffer(o)}>Accept counter</Btn>
+                        <Btn variant="secondary" size="sm" disabled={offerBusy === o.id} onClick={() => setCounteringOffer(o)}>Counter back</Btn>
                         <Btn variant="ghost" size="sm" disabled={offerBusy === o.id} onClick={() => withdrawOffer(o, true)}>Decline</Btn>
                       </>
                     )}
-                    {st === 'pending' && (
+                    {turn === 'SELLER' && (
                       <Btn variant="ghost" size="sm" disabled={offerBusy === o.id} onClick={() => withdrawOffer(o, false)}>Withdraw</Btn>
                     )}
                     {!['expired', 'withdrawn'].includes(st) && (
@@ -242,6 +284,11 @@ export default function BuyerDashboard() {
                     )}
                   </div>
                 </div>
+                {historyOffer === o.id && (
+                  <div style={{ background: T.surface, borderRadius: 8, padding: 12, marginTop: 10 }}>
+                    <NegotiationTimeline rounds={o.rounds} unit={unit} viewerRole="BUYER" />
+                  </div>
+                )}
               </div>
             );
           })}
@@ -256,7 +303,7 @@ export default function BuyerDashboard() {
           {ordersState === 'error' && <ErrorState message="Could not load your orders." onRetry={loadOrders} />}
           {ordersState === 'ready' && ORDERS.length === 0 && <EmptyState icon="📋" title="No orders yet" subtitle="Orders you place in the marketplace will appear here." />}
           {ordersState === 'ready' && ORDERS.map(o => (
-            <div key={o.id} style={{ padding: '14px 0', borderBottom: `1px solid ${T.border}` }}>
+            <div key={o.id} data-focus-id={o.id} style={{ padding: '14px 0', borderBottom: `1px solid ${T.border}` }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
                 <div>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 5 }}>
@@ -278,6 +325,7 @@ export default function BuyerDashboard() {
                         <strong>{(SC[h.status]?.l) || h.status}</strong> · {h.date}{h.note ? ` — ${h.note}` : ''}
                       </div>
                     )) : <span style={{ color: T.muted }}>No status history recorded yet.</span>}
+                    <OrderTermsAndInvoices order={o} role="buyer" invoices={invoices.filter(i => i.orderId === o._raw?.id)} onChanged={() => { loadInvoices(); loadOrders(); }} focusInvoiceId={deepLink.focusId} />
                   </div>
                 )}
               </div>
@@ -324,7 +372,7 @@ export default function BuyerDashboard() {
           {testingState === 'error' && <ErrorState message="Could not load testing requests." onRetry={loadTesting} />}
           {testingState === 'ready' && TESTING.length === 0 && <EmptyState icon="🧪" title="No testing requests yet" subtitle="Request a lab test from a product page to see it here." />}
           {testingState === 'ready' && TESTING.map(t => (
-            <Card key={t.id} style={{ marginBottom: 12 }}>
+            <div key={t.id} data-focus-id={t.id}><Card style={{ marginBottom: 12 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
                 <div>
                   <div style={{ fontWeight: 800, fontSize: 12, color: '#059669', marginBottom: 3 }}>{t.id}</div>
@@ -336,7 +384,7 @@ export default function BuyerDashboard() {
                   {(t.reportUrl || t.hasReportFile) && <Btn variant="secondary" size="sm" onClick={() => openReport(t)}>📄 View Report</Btn>}
                 </div>
               </div>
-            </Card>
+            </Card></div>
           ))}
         </div>
       )}
@@ -351,12 +399,29 @@ export default function BuyerDashboard() {
           {transportState === 'loading' && <LoadingState label="Loading transport requests…" />}
           {transportState === 'error' && <ErrorState message="Could not load transport requests." onRetry={loadTransport} />}
           {transportState === 'ready' && TRANSPORT.length === 0 && <EmptyState icon="🚛" title="No transport requests yet" subtitle="Request a quote from a transporter and it will show up here." />}
-          {transportState === 'ready' && TRANSPORT.map(r => <TransportRequestCard key={r.id} r={r} onChanged={loadTransport} />)}
+          {transportState === 'ready' && TRANSPORT.map(r => <div key={r.id} data-focus-id={r.id}><TransportRequestCard r={r} onChanged={loadTransport} /></div>)}
         </div>
       )}
 
       {/* WAREHOUSE TAB */}
       {tab === 'warehouse' && <PortalWarehouseTab accent="#B45309" />}
+
+      {acceptingOffer && (
+        <AcceptRoundDialog offer={acceptingOffer} role="BUYER" accept={apiAcceptCounter}
+          onClose={() => { setAcceptingOffer(null); loadOffers(); loadOrders(); }}
+          onDone={() => { setAcceptingOffer(null); loadOffers(); loadOrders(); setTab('orders'); }} />
+      )}
+      {counteringOffer && (
+        <ProposeRoundFlow offer={counteringOffer} role="BUYER"
+          onClose={() => { setCounteringOffer(null); loadOffers(); }} />
+      )}
+      {offerConfirm && (() => {
+        const { kind } = offerConfirm;
+        const copy = kind === 'decline'
+          ? { title: 'Decline counter-offer', confirmLabel: 'Decline counter', danger: true, description: "Decline the seller's counter-offer? The offer will be closed - you can still make a new one." }
+          : { title: 'Withdraw offer', confirmLabel: 'Withdraw offer', danger: true, description: 'Withdraw this offer? The seller will no longer be able to accept it.' };
+        return <ConfirmDialog {...copy} onConfirm={() => doOfferAction(offerConfirm)} onClose={() => setOfferConfirm(null)} />;
+      })()}
     </div>
   );
 }

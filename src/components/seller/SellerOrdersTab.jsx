@@ -1,10 +1,11 @@
 import { Card, Btn, LoadingState, ErrorState, EmptyState } from '../ui';
+import OrderTermsAndInvoices from '../invoices/OrderTermsAndInvoices';
 import OrderActions from '../OrderActions';
 import { STATUS_COLORS as SC } from '../../data';
 import T from '../../theme';
 
 // ─── SellerOrdersTab ───
-export function SellerOrdersTab({ openOrder, setOpenOrder, ORDERS, ordersState, loadOrders, loadListings }) {
+export function SellerOrdersTab({ openOrder, setOpenOrder, ORDERS, ordersState, loadOrders, loadListings, invoices = [], loadInvoices }) {
   return (
     <Card>
       <h3 style={{ margin: '0 0 16px', fontSize: 13, fontWeight: 800, color: T.green }}>All Orders</h3>
@@ -12,7 +13,7 @@ export function SellerOrdersTab({ openOrder, setOpenOrder, ORDERS, ordersState, 
       {ordersState === 'error' && <ErrorState message="Could not load orders." onRetry={loadOrders} />}
       {ordersState === 'ready' && ORDERS.length === 0 && <EmptyState icon="📋" title="No orders yet" />}
       {ordersState === 'ready' && ORDERS.map(o => (
-        <div key={o.id} style={{ padding: '14px 0', borderBottom: `1px solid ${T.border}` }}>
+        <div key={o.id} data-focus-id={o.id} style={{ padding: '14px 0', borderBottom: `1px solid ${T.border}` }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
             <div>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 5 }}>
@@ -33,6 +34,7 @@ export function SellerOrdersTab({ openOrder, setOpenOrder, ORDERS, ordersState, 
                     <strong>{(SC[h.status]?.l) || h.status}</strong> · {h.date}{h.note ? ` — ${h.note}` : ''}
                   </div>
                 )) : <span style={{ color: T.muted }}>No status history recorded yet.</span>}
+                <OrderTermsAndInvoices order={o} role="seller" invoices={invoices.filter(i => i.orderId === o._raw?.id)} onChanged={() => { loadInvoices?.(); loadOrders(); }} />
               </div>
             )}
           </div>

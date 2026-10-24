@@ -2,6 +2,7 @@ import { Card, Badge, LoadingState } from '../ui';
 import ClarificationThread from '../ClarificationThread';
 import T from '../../theme';
 import { fmtDate } from './shared';
+import { accessInfo } from '../../lib/access';
 
 export const KYC_LABELS = {
   PENDING:        { label: 'Not Submitted',        type: 'gray'  },
@@ -33,8 +34,24 @@ export const ProfileTab = ({ profile, loading, clarifications, onRespond }) => {
     ['Member Since', fmtDate(profile.createdAt)],
   ];
 
+  const access = accessInfo({ kycStatus: profile.kycStatus });
+  const toneStyle = { info: ['#BFDBFE', '#EFF6FF', '#1E40AF'], warn: ['#FDBA74', '#FFF7ED', '#9A3412'], danger: ['#FCA5A5', '#FEF2F2', '#991B1B'] };
+
   return (
     <div>
+      {/* Where the account stands and what the person can do next. */}
+      {!access.approved && access.info && (() => { const [bd, bg, fg] = toneStyle[access.info.tone] || toneStyle.info; return (
+        <Card style={{ marginBottom: 16, border: `1.5px solid ${bd}`, background: bg }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: fg, marginBottom: 4 }}>{access.info.icon} {access.info.title}</div>
+          <div style={{ fontSize: 12.5, color: fg, lineHeight: 1.6 }}>{access.info.message}</div>
+          {profile.kycStatus === 'REJECTED' && <div style={{ fontSize: 12.5, color: fg, lineHeight: 1.6, marginTop: 6 }}>Next step: open the <strong>Documents</strong> tab and upload corrected documents — your registration is then reviewed again.</div>}
+        </Card>
+      ); })()}
+      {profile.kycStatus === 'APPROVED' && (
+        <Card style={{ marginBottom: 16, border: '1.5px solid #86EFAC', background: '#F0FDF4' }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: '#166534' }}>✅ Your account is approved — all marketplace and service features are available.</div>
+        </Card>
+      )}
       {profile.kycStatus === 'REJECTED' && profile.kycRejectionNote && (
         <Card style={{ marginBottom: 16, border: '1.5px solid #FCA5A5', background: '#FEF2F2' }}>
           <div style={{ fontSize: 12, fontWeight: 800, color: '#991B1B', marginBottom: 4 }}>Registration Rejected</div>
@@ -51,6 +68,16 @@ export const ProfileTab = ({ profile, loading, clarifications, onRespond }) => {
             viewerRole="subject"
             onRespond={onRespond}
           />
+        </Card>
+      )}
+      {!!clarifications?.filter(c => c.status === 'RESOLVED').length && (
+        <Card style={{ marginBottom: 16 }}>
+          <details>
+            <summary style={{ cursor: 'pointer', fontSize: 12, fontWeight: 800, color: T.muted }}>Earlier verification conversations ({clarifications.filter(c => c.status === 'RESOLVED').length})</summary>
+            <div style={{ marginTop: 10 }}>
+              <ClarificationThread clarifications={clarifications.filter(c => c.status === 'RESOLVED')} viewerRole="subject" />
+            </div>
+          </details>
         </Card>
       )}
       <Card style={{ marginBottom: 16 }}>

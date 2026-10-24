@@ -9,6 +9,8 @@ import {
 import { Card, Btn } from '../ui';
 import T from '../../theme';
 import { clickable } from '../../lib/a11y';
+import AdminTransportDisputes from './AdminTransportDisputes';
+import { notify } from '../../lib/notify';
 
 // ─── AdminLogisticsSection ───
 export function AdminLogisticsSection({ warehouses, setWarehouses, loading, setListingDetail, testingAgencies, setTestingAgencies, transporters, setTransporters, handleRequestProviderInfo }) {
@@ -42,13 +44,13 @@ export function AdminLogisticsSection({ warehouses, setWarehouses, loading, setL
                       try {
                         await apiAdminVerifyWarehouse(w.id, !w.isVerified);
                         setWarehouses(prev => prev.map(x => x.id === w.id ? { ...x, isVerified: !x.isVerified } : x));
-                      } catch (e) { alert(e.message); }
+                      } catch (e) { notify(e.message); }
                     }}>{w.isVerified ? 'Unverify' : 'Verify'}</Btn>
                     <Btn variant={w.isActive ? 'danger' : 'secondary'} size="sm" onClick={async () => {
                       try {
                         await apiAdminSetWarehouseActive(w.id, !w.isActive);
                         setWarehouses(prev => prev.map(x => x.id === w.id ? { ...x, isActive: !x.isActive } : x));
-                      } catch (e) { alert(e.message); }
+                      } catch (e) { notify(e.message); }
                     }}>{w.isActive ? 'Delist' : 'Relist'}</Btn>
                     <Btn variant="ghost" size="sm" onClick={() => handleRequestProviderInfo('WAREHOUSE_PROFILE', w.id)}>Request Info</Btn>
                   </div>
@@ -84,13 +86,13 @@ export function AdminLogisticsSection({ warehouses, setWarehouses, loading, setL
                     try {
                       await apiAdminVerifyTestingAgency(a.id, !a.isVerified);
                       setTestingAgencies(prev => prev.map(x => x.id === a.id ? { ...x, isVerified: !x.isVerified } : x));
-                    } catch (e) { alert(e.message); }
+                    } catch (e) { notify(e.message); }
                   }}>{a.isVerified ? 'Unverify' : 'Verify'}</Btn>
                   <Btn variant={a.isActive ? 'danger' : 'secondary'} size="sm" onClick={async () => {
                     try {
                       await apiAdminSetTestingAgencyActive(a.id, !a.isActive);
                       setTestingAgencies(prev => prev.map(x => x.id === a.id ? { ...x, isActive: !x.isActive } : x));
-                    } catch (e) { alert(e.message); }
+                    } catch (e) { notify(e.message); }
                   }}>{a.isActive ? 'Delist' : 'Relist'}</Btn>
                   <Btn variant="ghost" size="sm" onClick={() => handleRequestProviderInfo('TESTING_AGENCY_PROFILE', a.id)}>Request Info</Btn>
                 </td>
@@ -124,13 +126,13 @@ export function AdminLogisticsSection({ warehouses, setWarehouses, loading, setL
                     try {
                       await apiAdminVerifyTransport(t.id, !t.isVerified);
                       setTransporters(prev => prev.map(x => x.id === t.id ? { ...x, isVerified: !x.isVerified } : x));
-                    } catch (e) { alert(e.message); }
+                    } catch (e) { notify(e.message); }
                   }}>{t.isVerified ? 'Unverify' : 'Verify'}</Btn>
                   <Btn variant={t.isActive ? 'danger' : 'secondary'} size="sm" onClick={async () => {
                     try {
                       await apiAdminSetTransportActive(t.id, !t.isActive);
                       setTransporters(prev => prev.map(x => x.id === t.id ? { ...x, isActive: !x.isActive } : x));
-                    } catch (e) { alert(e.message); }
+                    } catch (e) { notify(e.message); }
                   }}>{t.isActive ? 'Delist' : 'Relist'}</Btn>
                   <Btn variant="ghost" size="sm" onClick={() => handleRequestProviderInfo('TRANSPORT_PROFILE', t.id)}>Request Info</Btn>
                 </td>
@@ -142,6 +144,8 @@ export function AdminLogisticsSection({ warehouses, setWarehouses, loading, setL
           </tbody>
         </table></div>
       </Card>
+
+      <AdminTransportDisputes />
     </div>
   );
 }

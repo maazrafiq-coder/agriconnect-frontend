@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { apiAdminGetSettings, apiAdminSetPlatformFee, apiAdminSetCommodityPrice, apiAdminDeleteCommodityPrice } from '../../lib/api';
 import { Card, Btn } from '../ui';
+import ConfirmDialog from '../ui/ConfirmDialog';
 import T from '../../theme';
 
 const fieldStyle = { padding: '9px 12px', border: `1.5px solid ${T.border}`, borderRadius: 8, fontSize: 13, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' };
@@ -12,6 +13,7 @@ export default function AdminPricingPanel() {
   const [price, setPrice] = useState('');
   const [msg, setMsg] = useState(null); // { ok, text }
   const [busy, setBusy] = useState(false);
+  const [removing, setRemoving] = useState(null);
 
   const load = async () => {
     try {
@@ -61,7 +63,7 @@ export default function AdminPricingPanel() {
                 <td style={{ padding: '8px 4px' }}>₨{Number(p.pricePerTon).toLocaleString()} / ton</td>
                 <td style={{ padding: '8px 4px', textAlign: 'right', whiteSpace: 'nowrap' }}>
                   <Btn variant="ghost" size="sm" disabled={busy} onClick={() => { setName(p.label); setPrice(String(Number(p.pricePerTon))); }}>Edit</Btn>{' '}
-                  <Btn variant="danger" size="sm" disabled={busy} onClick={() => window.confirm(`Remove the price for ${p.label}?`) && run(() => apiAdminDeleteCommodityPrice(p.commodity), 'Price removed.')}>Remove</Btn>
+                  <Btn variant="danger" size="sm" disabled={busy} onClick={() => setRemoving(p)}>Remove</Btn>
                 </td>
               </tr>
             ))}
@@ -69,6 +71,15 @@ export default function AdminPricingPanel() {
           </tbody>
         </table></div>
       </Card>
+      {removing && (
+        <ConfirmDialog
+          title="Remove commodity price" danger confirmLabel="Remove price"
+          description={`Remove the price for ${removing.label}?`}
+          consequences={['New warehouse receipts for this commodity will be "valuation pending" and cannot be used for loans until a price is set again.']}
+          onConfirm={async () => { await apiAdminDeleteCommodityPrice(removing.commodity); await load(); setMsg({ ok: true, text: 'Price removed.' }); }}
+          onClose={() => setRemoving(null)}
+        />
+      )}
       {msg && <div style={{ marginTop: 12, fontSize: 13, color: msg.ok ? '#15803D' : T.danger }}>{msg.text}</div>}
     </div>
   );

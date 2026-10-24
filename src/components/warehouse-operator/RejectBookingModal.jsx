@@ -1,47 +1,33 @@
-import { useState } from 'react';
 import { apiRejectBooking } from '../../lib/api';
-import { Btn, Modal } from '../ui';
-import T from '../../theme';
-import { inputStyle, labelStyle } from './shared';
+import ConfirmDialog from '../ui/ConfirmDialog';
 
 // ─── REJECT BOOKING MODAL ────────────────────────────────────────────────────
+// A reason is required (the depositor sees it). Ends on a confirmation screen.
 export function RejectBookingModal({ booking, onClose, onRejected }) {
-  const [reason, setReason] = useState('');
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-
-  const submit = async () => {
-    setError('');
-    if (!reason.trim()) return setError('Please provide a reason so the depositor understands why.');
-    setBusy(true);
-    try {
-      await apiRejectBooking(booking.id, reason.trim());
-      onRejected();
-    } catch (err) {
-      setError(err.message || 'Could not reject this booking.');
-      setBusy(false);
-    }
-  };
-
+  const depositor = booking.depositor?.profile?.fullName || 'the depositor';
   return (
-    <Modal title={`Decline Booking — ${booking.bookingReference || ''}`} onClose={onClose}>
-      <p style={{ fontSize: 13, color: T.muted, margin: '0 0 14px', lineHeight: 1.6 }}>
-        Let {booking.depositor?.profile?.fullName || 'the depositor'} know why you can't accept this booking for {booking.commodity}.
-      </p>
-      <div style={{ marginBottom: 14 }}>
-        <label htmlFor="rejectbookingmodal-f1" style={labelStyle}>REASON</label>
-        <textarea id="rejectbookingmodal-f1"
-          style={{ ...inputStyle, minHeight: 70, resize: 'vertical' }}
-          value={reason}
-          onChange={e => setReason(e.target.value)}
-          placeholder="e.g. No capacity available for this commodity right now"
-        />
-      </div>
-      {error && <p style={{ color: T.danger, fontSize: 12, marginBottom: 12 }}>{error}</p>}
-      <div style={{ display: 'flex', gap: 10 }}>
-        <Btn variant="ghost" onClick={onClose} disabled={busy} style={{ flex: 1 }}>Cancel</Btn>
-        <Btn variant="danger" onClick={submit} disabled={busy} style={{ flex: 1 }}>{busy ? 'Declining…' : 'Decline Booking'}</Btn>
-      </div>
-    </Modal>
+    <ConfirmDialog
+      title={`Decline Booking - ${booking.bookingReference || ''}`}
+      description={`Tell ${depositor} why you can't accept this booking for ${booking.commodity}.`}
+      consequences={[
+        'The booking is closed and the depositor is notified with your reason.',
+        'The reserved capacity is released.',
+      ]}
+      danger
+      reasonLabel="Reason"
+      reasonRequired
+      reasonPlaceholder="e.g. No capacity available for this commodity right now"
+      confirmLabel="Decline Booking"
+      confirmingLabel="Declining…"
+      onConfirm={({ reason }) => apiRejectBooking(booking.id, reason)}
+      success={() => ({
+        icon: '✅',
+        title: 'Booking declined',
+        message: `${depositor} has been notified.`,
+        rows: [{ label: 'Booking', value: booking.bookingReference }, { label: 'Status', value: 'Declined' }],
+      })}
+      onClose={onClose}
+      onDone={() => onRejected?.()}
+    />
   );
 }

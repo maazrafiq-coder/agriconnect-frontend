@@ -3,9 +3,12 @@ import { apiAdminGetCities, apiAdminCreateCity, apiAdminUpdateCity, apiAdminDeac
 import { Card, Btn, Badge, Modal } from '../ui';
 import T from '../../theme';
 import { inputStyle } from './shared';
+import useConfirm from '../ui/useConfirm';
+import { notify } from '../../lib/notify';
 
 // ─── CITIES PANEL ───────────────────────────────────────────────────────────
 export function CitiesPanel() {
+  const [confirmNode, confirm] = useConfirm();
   const [cities, setCities] = useState([]);
   const [loading, setLoading] = useState(true);
   const [addModal, setAddModal] = useState(false);
@@ -24,6 +27,7 @@ export function CitiesPanel() {
 
   return (
     <div>
+      {confirmNode}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <p style={{ fontSize: 12, color: T.muted, margin: 0 }}>{cities.length} cities across {Object.keys(byProvince).length} provinces</p>
         <Btn variant="gold" onClick={() => setAddModal(true)}>+ Add City</Btn>
@@ -42,12 +46,16 @@ export function CitiesPanel() {
                 <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
                   <Btn variant="secondary" size="sm" onClick={() => setEditModal(c)}>Edit</Btn>
                   {c.isActive ? (
-                    <Btn variant="danger" size="sm" onClick={async () => {
-                      try { await apiAdminDeactivateCity(c.id); setCities(prev => prev.map(x => x.id === c.id ? { ...x, isActive: false } : x)); } catch (e) { alert(e.message); }
-                    }}>Deactivate</Btn>
+                    <Btn variant="danger" size="sm" onClick={() => confirm({
+                      title: `Deactivate city - ${c.name}`, danger: true, confirmLabel: 'Deactivate',
+                      description: `Deactivate "${c.name}"?`,
+                      consequences: ['It can no longer be chosen on new listings or registrations.', 'You can reactivate it later.'],
+                      run: async () => { await apiAdminDeactivateCity(c.id); setCities(prev => prev.map(x => x.id === c.id ? { ...x, isActive: false } : x)); },
+                      successTitle: 'City deactivated',
+                    })}>Deactivate</Btn>
                   ) : (
                     <Btn variant="secondary" size="sm" onClick={async () => {
-                      try { await apiAdminReactivateCity(c.id); setCities(prev => prev.map(x => x.id === c.id ? { ...x, isActive: true } : x)); } catch (e) { alert(e.message); }
+                      try { await apiAdminReactivateCity(c.id); setCities(prev => prev.map(x => x.id === c.id ? { ...x, isActive: true } : x)); } catch (e) { notify(e.message); }
                     }}>Reactivate</Btn>
                   )}
                 </div>

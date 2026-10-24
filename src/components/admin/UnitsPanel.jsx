@@ -10,6 +10,8 @@ import {
 import { Card, Btn, Badge, Modal } from '../ui';
 import T from '../../theme';
 import { inputStyle } from './shared';
+import useConfirm from '../ui/useConfirm';
+import { notify } from '../../lib/notify';
 
 // ─── UNITS PANEL ────────────────────────────────────────────────────────────
 export function UnitsPanel() {
@@ -77,8 +79,10 @@ export function UnitsPanel() {
 }
 
 export function UnitGrid({ list, onEdit, setUnits }) {
+  const [confirmNode, confirm] = useConfirm();
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(180px,1fr))', gap: 8 }}>
+      {confirmNode}
       {list.map(u => (
         <Card key={u.id} style={{ padding: 12, opacity: u.isActive ? 1 : 0.6 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -88,12 +92,16 @@ export function UnitGrid({ list, onEdit, setUnits }) {
           <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
             <Btn variant="secondary" size="sm" onClick={() => onEdit(u)}>Edit</Btn>
             {u.isActive ? (
-              <Btn variant="danger" size="sm" onClick={async () => {
-                try { await apiAdminDeactivateUnit(u.id); setUnits(prev => prev.map(x => x.id === u.id ? { ...x, isActive: false } : x)); } catch (e) { alert(e.message); }
-              }}>Deactivate</Btn>
+              <Btn variant="danger" size="sm" onClick={() => confirm({
+                title: `Deactivate unit - ${u.name}`, danger: true, confirmLabel: 'Deactivate',
+                description: `Deactivate the unit "${u.name}"?`,
+                consequences: ['It can no longer be chosen on new listings.', 'Existing listings keep their unit. You can reactivate it later.'],
+                run: async () => { await apiAdminDeactivateUnit(u.id); setUnits(prev => prev.map(x => x.id === u.id ? { ...x, isActive: false } : x)); },
+                successTitle: 'Unit deactivated',
+              })}>Deactivate</Btn>
             ) : (
               <Btn variant="secondary" size="sm" onClick={async () => {
-                try { await apiAdminReactivateUnit(u.id); setUnits(prev => prev.map(x => x.id === u.id ? { ...x, isActive: true } : x)); } catch (e) { alert(e.message); }
+                try { await apiAdminReactivateUnit(u.id); setUnits(prev => prev.map(x => x.id === u.id ? { ...x, isActive: true } : x)); } catch (e) { notify(e.message); }
               }}>Reactivate</Btn>
             )}
           </div>

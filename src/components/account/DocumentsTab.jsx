@@ -3,6 +3,7 @@ import { apiSubmitKyc, apiGetKycDocumentSignedUrl, resolveApiFileUrl } from '../
 import { Card, Badge, LoadingState } from '../ui';
 import T from '../../theme';
 import { fmtDate } from './shared';
+import { notify } from '../../lib/notify';
 
 export const DOC_LABELS = {
   cnicFront:            '🪪 CNIC — Front',
@@ -87,7 +88,7 @@ export const DocumentsTab = ({ documents, loading, onUploaded }) => {
       if (tab) tab.location.href = resolveApiFileUrl(url);
     } catch (e) {
       if (tab) tab.close();
-      alert(e.message || 'Could not open document — please try again.');
+      notify(e.message || 'Could not open document — please try again.');
     }
   };
 

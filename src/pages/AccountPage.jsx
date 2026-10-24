@@ -11,12 +11,15 @@ import { DocumentsTab } from '../components/account/DocumentsTab';
 import { ActivityTab } from '../components/account/ActivityTab';
 import { DangerZoneTab } from '../components/account/DangerZoneTab';
 
+import { useDeepLink } from '../lib/deeplink';
 // ─── MAIN PAGE ───────────────────────────────────────────────────────────────
 export default function AccountPage() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
 
   const [tab, setTab] = useState('profile');
+  // Notification links: ?tab=profile|documents&type=kyc|clarification&id=…
+  useDeepLink({ validTabs: ['profile', 'edit', 'password', 'documents', 'activity', 'danger'], setTab });
   const [profile, setProfile] = useState(null);
   const [profileLoading, setProfileLoading] = useState(true);
   const [documents, setDocuments] = useState([]);
@@ -50,12 +53,13 @@ export default function AccountPage() {
     loadClarifications();
   }, []);
 
-  const handleRespondToClarification = async (id, message, files) => {
-    await apiRespondToClarification(id, message, files);
+  const handleRespondToClarification = async (id, message, files, reqId) => {
+    const saved = await apiRespondToClarification(id, message, files, reqId);
     loadClarifications();
     // Responding moves the account back to "Under Review" — refresh the
     // profile so the status badge at the top reflects that immediately.
     apiGetProfile().then(setProfile).catch(() => {});
+    return saved;
   };
 
   const handlePasswordChanged = async () => {

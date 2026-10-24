@@ -35,3 +35,22 @@ describe('api client', () => {
     await expect(apiGetPublicStats()).rejects.toThrow('Unauthorized');
   });
 });
+
+describe('transport Phase 3 API helpers', () => {
+  it('accept sends the round id; quote/counter send an Idempotency-Key; invoices use /transport-invoices', async () => {
+    const calls = [];
+    globalThis.fetch = vi.fn(async (url, init) => { calls.push([String(url), init]); return { ok: true, status: 200, json: async () => ({}), headers: new Headers() }; });
+    const m = await import('./api');
+    await m.apiAcceptTransportQuote('t1', 'q9');
+    await m.apiQuoteTransport('t1', { price: '100' }, 'key-1');
+    await m.apiCounterTransportQuote('t1', { price: 90, roundId: 'q9' }, 'key-2');
+    await m.apiIssueTransportInvoice('t1');
+    await m.apiRaiseTransportDispute('t1', { category: 'OTHER', description: 'long enough text' }, 'key-3');
+    const find = (frag) => calls.find(([u]) => u.includes(frag));
+    expect(JSON.parse(find('/accept')[1].body)).toEqual({ roundId: 'q9', acceptTerms: true });
+    expect(find('/quote')[1].headers['Idempotency-Key']).toBe('key-1');
+    expect(find('/counter')[1].headers['Idempotency-Key']).toBe('key-2');
+    expect(find('/transport-invoices/request/t1')[1].method).toBe('POST');
+    expect(find('/transport/disputes/request/t1')[1].headers['Idempotency-Key']).toBe('key-3');
+  });
+});

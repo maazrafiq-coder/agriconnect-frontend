@@ -26,7 +26,11 @@ export default function TrackingPage() {
       {state === 'ready' && r && (
         <div style={{ background: T.white, border: `1px solid ${T.border}`, borderRadius: 12, padding: 22 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-            <div style={{ fontWeight: 800, fontSize: 16 }}>{r.from} → {r.to}</div>
+            <div>
+              <div style={{ fontWeight: 800, fontSize: 16 }}>{r.from} → {r.to}</div>
+              {r.transportOrderRef && <div data-testid="tracking-order" style={{ fontSize: 13, fontWeight: 800, marginTop: 2 }}>Transport order {r.transportOrderRef}</div>}
+              {r.requestRef && <div data-testid="tracking-ref" style={{ fontSize: 12, color: T.muted, marginTop: 2 }}>Request ref {r.requestRef}</div>}
+            </div>
             <StatusPill status={r.status} />
           </div>
           {idx >= 0 ? (
@@ -42,8 +46,12 @@ export default function TrackingPage() {
             {r.currentLocation && <div>📍 Last known location: <strong>{r.currentLocation}</strong></div>}
             {r.eta && r.status !== 'DELIVERED' && <div>🕒 Estimated arrival: <strong>{r.eta}</strong></div>}
             {r.driverName && <div>👤 Driver: {r.driverName}</div>}
+            {r.vehicleType && <div>🚛 Vehicle: {r.vehicleType.replace(/_/g, ' ').toLowerCase()}</div>}
             {r.pickedUpAt && <div>Picked up: {r.pickedUpAt}</div>}
             {r.deliveredAt && <div>Delivered: {r.deliveredAt}</div>}
+            <div data-testid="tracking-privacy" style={{ marginTop: 10, fontSize: 11.5, color: T.muted, lineHeight: 1.5 }}>
+              For privacy this public page shows only the driver's first name and initial. The full driver name, phone number and vehicle registration are available to the buyer and the transporter after they sign in.
+            </div>
             {!r.currentLocation && !r.eta && ['BOOKED'].includes(r.status) && <div style={{ color: T.muted }}>No updates from the driver yet.</div>}
           </div>
         </div>

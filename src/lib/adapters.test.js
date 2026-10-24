@@ -38,3 +38,23 @@ describe('adaptOffer', () => {
     expect(o.productUnit).toBe('maund');
   });
 });
+
+describe('adaptTransportRequest — Phase 3 fields', () => {
+  const raw = {
+    id: 't1', status: 'QUOTED', pickupCity: 'Lahore', deliveryCity: 'Karachi', requestRef: 'TRQ-2026-000001', orderRef: 'AB12CD34',
+    order: { id: 'AB12CD34-x', ref: 'AB12CD34', productName: 'Basmati' }, requesterName: 'Bilal',
+    provider: { companyName: 'FastHaul', name: 'Omar' }, rounds: [{ id: 'q1', roundNo: 1 }], currentRound: { id: 'q1', price: 5 }, turn: 'REQUESTER',
+    vehicleRegNo: 'LEA-1', invoice: { id: 'i1' }, dispute: null, disputes: [], canAcknowledge: false, quotedPrice: '45000.00',
+  };
+  it('carries references, rounds, turn, driver plate, invoice and names', () => {
+    const a = adaptTransportRequest(raw);
+    expect(a).toMatchObject({ requestRef: 'TRQ-2026-000001', orderRef: 'AB12CD34', orderProduct: 'Basmati', requester: 'Bilal', provider: 'FastHaul', turn: 'REQUESTER', vehicleRegNo: 'LEA-1', quotedPrice: 45000 });
+    expect(a.rounds).toHaveLength(1);
+    expect(a.currentRound.id).toBe('q1');
+    expect(a.invoice.id).toBe('i1');
+  });
+  it('stays backwards compatible with older payloads (no rounds / refs)', () => {
+    const a = adaptTransportRequest({ id: 't2', status: 'REQUESTED', pickupCity: 'A', deliveryCity: 'B', requester: { profile: { fullName: 'X' } } });
+    expect(a).toMatchObject({ requestRef: '', rounds: [], currentRound: null, turn: null, disputes: [], invoice: null, requester: 'X' });
+  });
+});

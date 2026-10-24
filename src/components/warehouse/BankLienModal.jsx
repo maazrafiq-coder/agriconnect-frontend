@@ -1,9 +1,10 @@
 import { useState } from 'react';
+import RequestFlowModal from '../ui/RequestFlowModal';
+import useRequestId from '../../lib/useRequestId';
 import T from '../../theme';
 import { apiApplyLien } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
-import { Btn } from '../ui';
-import { ErrorBanner, amber, Modal, InfoRow, inputStyle } from './shared';
+import { amber, inputStyle } from './shared';
 
 // ─── BANK LIEN MODAL ──────────────────────────────────────────────────────────
 export const BankLienModal = ({ receipt, onClose, onSubmit }) => {
@@ -11,31 +12,13 @@ export const BankLienModal = ({ receipt, onClose, onSubmit }) => {
   const [bank, setBank] = useState('');
   const [amount, setAmount] = useState('');
   const [purpose, setPurpose] = useState('working_capital');
-  const [submitted, setSubmitted] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState(null);
   const maxLoan = Math.round(receipt.currentValue * 0.7);
+  const requestKey = useRequestId(JSON.stringify([receipt.id, bank, amount, purpose]));
+  const purposeLabel = { working_capital: 'Working Capital', input_purchase: 'Input Purchase (Seeds, Fertilizer)', equipment: 'Equipment Purchase', new_crop: 'New Crop Financing' }[purpose];
+  const rec = receipt.number || receipt.id;
 
-  if (submitted) return (
-    <Modal title="Loan Application Submitted" onClose={onClose}>
-      <div style={{textAlign:'center',padding:'24px 0'}}>
-        <div style={{fontSize:56,marginBottom:14}}>🏦</div>
-        <h3 style={{color:T.green,margin:'0 0 10px'}}>Application Received!</h3>
-        <p style={{color:T.muted,fontSize:13,margin:'0 0 20px',lineHeight:1.6}}>Your loan application against warehouse receipt <strong>{receipt.number||receipt.id}</strong> ({bank}) is awaiting confirmation by an AgriConnect reviewer. Your goods are on hold until it is decided, and you can withdraw the application any time before then.</p>
-        <div style={{background:T.surface,borderRadius:10,padding:14,marginBottom:20,textAlign:'left'}}>
-          <InfoRow label="Receipt No." value={receipt.number||receipt.id}/>
-          <InfoRow label="Commodity" value={`${receipt.qty} ${receipt.unit} of ${receipt.commodity}`}/>
-          <InfoRow label="Collateral Value" value={`₨${receipt.currentValue.toLocaleString()}`}/>
-          <InfoRow label="Requested Loan" value={`₨${Number(amount).toLocaleString()}`} accent={amber}/>
-          <InfoRow label="Bank" value={bank}/>
-        </div>
-        <Btn variant="primary" onClick={onClose}>Done</Btn>
-      </div>
-    </Modal>
-  );
-
-  return (
-    <Modal title="Apply for Warehouse Receipt Loan" onClose={onClose}>
+  const form = (
+    <div>
       <div style={{background:'#FFFBEB',border:`1px solid #FDE68A`,borderRadius:10,padding:14,marginBottom:18}}>
         <div style={{fontSize:12,fontWeight:700,color:amber,marginBottom:6}}>📋 Collateral Details</div>
         <div style={{display:'grid',gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))',gap:8}}>
@@ -76,28 +59,55 @@ export const BankLienModal = ({ receipt, onClose, onSubmit }) => {
         ))}
       </div>
 
-      <ErrorBanner message={error} onLogin={openLogin}/>
-      <Btn variant="amber" style={{width:'100%',padding:'11px'}} disabled={!bank||!amount||Number(amount)>maxLoan||submitting} onClick={async ()=>{
-        setError(null);
-        setSubmitting(true);
-        try {
-          await apiApplyLien({
-            receiptId: receipt._raw?.id || receipt.id,
-            bankName: bank,
-            loanPurpose: purpose,
-            loanAmount: Number(amount),
-            interestRate: 8,
-            tenureMonths: 6,
-          });
-          setSubmitted(true);
-        } catch (e) {
-          setError(e?.message || 'Failed to submit loan application. Please try again.');
-        } finally {
-          setSubmitting(false);
-        }
-      }}>
-        {submitting ? 'Submitting…' : 'Submit Loan Application →'}
-      </Btn>
-    </Modal>
+    </div>
+  );
+
+  return (
+    <RequestFlowModal
+      title="Apply for Warehouse Receipt Loan"
+      stepLabels={['Details', 'Review', 'Submitted']}
+      width={520}
+      form={form}
+      canReview={!!bank && !!amount}
+      validate={() => (!bank ? 'Choose a bank.' : !(Number(amount) > 0) ? 'Enter a loan amount.' : Number(amount) > maxLoan ? `The amount is above the indicative limit of ₨${maxLoan.toLocaleString()}.` : null)}
+      reviewTitle="Check your loan application"
+      reviewNotice="Submitting places your goods on hold while an AgriConnect reviewer confirms the application. Interest, fees and tenure are set by the bank - the figures below are only indicative. You can withdraw the application any time before it is decided."
+      summaryRows={[
+        { label: 'Receipt No.', value: rec },
+        { label: 'Commodity', value: `${receipt.qty} ${receipt.unit || ''} of ${receipt.commodity}`.replace('  ', ' ') },
+        { label: 'Collateral value', value: `₨${receipt.currentValue.toLocaleString()}` },
+        { label: 'Bank', value: bank },
+        { label: 'Purpose', value: purposeLabel },
+        { label: 'Requested loan', value: `₨${Number(amount).toLocaleString()}`, accent: amber },
+        { label: 'Indicative terms', value: '8% / 6 months (final terms set by the bank)' },
+      ]}
+      confirmLabel="Submit Loan Application"
+      confirmingLabel="Submitting…"
+      onSubmit={async () => {
+        const res = await apiApplyLien({
+          receiptId: receipt._raw?.id || receipt.id,
+          bankName: bank,
+          loanPurpose: purpose,
+          loanAmount: Number(amount),
+          interestRate: 8,
+          tenureMonths: 6,
+        }, requestKey());
+        onSubmit?.(res);
+        return res;
+      }}
+      success={() => ({
+        icon: '🏦',
+        title: 'Application received',
+        message: `Your application against receipt ${rec} (${bank}) is awaiting confirmation by an AgriConnect reviewer. Your goods are on hold until it is decided; you can withdraw it any time before then. No money has moved.`,
+        rows: [
+          { label: 'Receipt No.', value: rec },
+          { label: 'Requested loan', value: `₨${Number(amount).toLocaleString()}`, accent: amber },
+          { label: 'Bank', value: bank },
+        ],
+        status: 'Awaiting review',
+      })}
+      onClose={onClose}
+      onLogin={openLogin}
+    />
   );
 };

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { apiGetReceivedOffers, apiGetOrders, apiGetMyProducts } from '../lib/api';
+import { apiGetReceivedOffers, apiGetOrders, apiGetMyProducts, apiGetIssuedInvoices } from '../lib/api';
 import { adaptOffers, adaptOrders, adaptProducts } from '../lib/adapters';
 import { useNavigate } from 'react-router-dom';
 import { Btn, Tabs } from '../components/ui';
@@ -8,7 +8,6 @@ import PortalWarehouseTab from '../components/PortalWarehouseTab';
 import usePortalProfile from '../lib/usePortalProfile';
 import { STATUS_COLORS as SC } from '../data';
 import T from '../theme';
-import { CounterOfferModal } from '../components/seller/CounterOfferModal';
 import { DeclineOfferModal } from '../components/seller/DeclineOfferModal';
 import { NewListingModal } from '../components/seller/NewListingModal';
 import { SellerOverviewTab } from '../components/seller/SellerOverviewTab';
@@ -17,12 +16,15 @@ import { SellerOffersTab } from '../components/seller/SellerOffersTab';
 import { SellerOrdersTab } from '../components/seller/SellerOrdersTab';
 import { SellerMessagesTab } from '../components/seller/SellerMessagesTab';
 
+import { useApprovalGate } from '../context/ApprovalGate';
+import { useDeepLink } from '../lib/deeplink';
+import DeepLinkNotice from '../components/DeepLinkNotice';
 export default function SellerDashboard() {
   const navigate = useNavigate();
   const [tab, setTab] = useState('overview');
   const [declineModal, setDeclineModal] = useState(null);
-  const [counterModal, setCounterModal] = useState(null);
   const [newListingModal, setNewListingModal] = useState(false);
+  const gate = useApprovalGate();
   const [editListing, setEditListing] = useState(null); // adapted listing being edited
   const [mediaModalProduct, setMediaModalProduct] = useState(null);
   const [activeConvo, setActiveConvo] = useState(0);
@@ -33,8 +35,20 @@ export default function SellerDashboard() {
   const [offersState, setOffersState] = useState('loading');
   const [ORDERS, setORDERS] = useState([]);
   const [ordersState, setOrdersState] = useState('loading');
+  const [invoices, setInvoices] = useState([]);
+  const [invoicesLoaded, setInvoicesLoaded] = useState(false);
   const [myListings, setMyListings] = useState([]);
   const [listingsState, setListingsState] = useState('loading');
+  const deepLink = useDeepLink({
+    validTabs: ['overview', 'listings', 'offers', 'orders', 'warehouse', 'messages'],
+    setTab,
+    lookup: {
+      offer: { ready: offersState !== 'loading', ids: OFFERS.map(o => o.id) },
+      order: { ready: ordersState !== 'loading', ids: ORDERS.map(o => o.id) },
+      listing: { ready: listingsState !== 'loading', ids: myListings.map(p => p.id) },
+      invoice: { ready: invoicesLoaded, ids: invoices.map(i => i.id) },
+    },
+  });
 
   const loadOffers = () => {
     setOffersState('loading');
@@ -54,6 +68,17 @@ export default function SellerDashboard() {
       });
   };
 
+  const loadInvoices = () => {
+    apiGetIssuedInvoices().then(d => setInvoices(Array.isArray(d) ? d : [])).catch(() => setInvoices([])).finally(() => setInvoicesLoaded(true));
+  };
+
+  // An invoice notification opens the order that holds it.
+  useEffect(() => {
+    if (deepLink.params.type !== 'invoice') return;
+    const inv = invoices.find(i => i.id === deepLink.params.id);
+    if (inv) setOpenOrder(inv.orderId);
+  }, [invoices, deepLink.params.type, deepLink.params.id]);
+
   const loadListings = () => {
     setListingsState('loading');
     apiGetMyProducts()
@@ -64,6 +89,7 @@ export default function SellerDashboard() {
   useEffect(() => {
     loadOffers();
     loadOrders();
+    loadInvoices();
     loadListings();
   }, []);
 
@@ -105,9 +131,10 @@ export default function SellerDashboard() {
             <p style={{ margin: 0, color: T.muted, fontSize: 12 }}>{portal.subtitle || ' '}</p>
           </div>
         </div>
-        <Btn variant="gold" onClick={() => setNewListingModal(true)}>+ New Listing</Btn>
+        <Btn variant="gold" onClick={gate(() => setNewListingModal(true), 'create a listing')}>+ New Listing</Btn>
       </div>
 
+      <DeepLinkNotice notice={deepLink.notice} onDismiss={deepLink.dismiss} />
       <Tabs
         tabs={[['overview','📊 Overview'],['listings','📦 Listings'],['offers',`💬 Offers${pendingOfferCount ? ` (${pendingOfferCount})` : ''}`],['orders','📋 Orders'],['warehouse','🏪 Warehouse'],['messages','✉️ Messages']]}
         active={tab} onChange={setTab} color={T.green}
@@ -120,10 +147,10 @@ export default function SellerDashboard() {
       {tab === 'listings' && <SellerListingsTab navigate={navigate} setNewListingModal={setNewListingModal} setEditListing={setEditListing} setMediaModalProduct={setMediaModalProduct} myListings={myListings} setMyListings={setMyListings} listingsState={listingsState} loadListings={loadListings} />}
 
       {/* OFFERS */}
-      {tab === 'offers' && <SellerOffersTab setDeclineModal={setDeclineModal} setCounterModal={setCounterModal} OFFERS={OFFERS} offersState={offersState} loadOffers={loadOffers} loadOrders={loadOrders} loadListings={loadListings} />}
+      {tab === 'offers' && <SellerOffersTab setDeclineModal={setDeclineModal} OFFERS={OFFERS} offersState={offersState} loadOffers={loadOffers} loadOrders={loadOrders} loadListings={loadListings} />}
 
       {/* ORDERS */}
-      {tab === 'orders' && <SellerOrdersTab openOrder={openOrder} setOpenOrder={setOpenOrder} ORDERS={ORDERS} ordersState={ordersState} loadOrders={loadOrders} loadListings={loadListings} />}
+      {tab === 'orders' && <SellerOrdersTab openOrder={openOrder} setOpenOrder={setOpenOrder} ORDERS={ORDERS} ordersState={ordersState} loadOrders={loadOrders} loadListings={loadListings} invoices={invoices} loadInvoices={loadInvoices} />}
 
       {/* MESSAGES — derived from real offers */}
       {tab === 'messages' && <SellerMessagesTab setActiveConvo={setActiveConvo} activeOffer={activeOffer} setActiveOffer={setActiveOffer} CONVOS={CONVOS} convo={convo} />}
@@ -131,15 +158,9 @@ export default function SellerDashboard() {
       {/* WAREHOUSE TAB */}
       {tab === 'warehouse' && <PortalWarehouseTab accent={T.green} />}
 
-      {/* COUNTER OFFER MODAL */}
-      {counterModal && <CounterOfferModal offer={counterModal} onClose={() => setCounterModal(null)} onSent={(updated) => {
-        setOFFERS(prev => prev.map(x => x.id === counterModal.id ? { ...x, status: 'countered', counter: updated.counterPrice } : x));
-        setCounterModal(null);
-      }} />}
-
-      {declineModal && <DeclineOfferModal offer={declineModal} onClose={() => setDeclineModal(null)} onDeclined={(reason) => {
-        setOFFERS(prev => prev.map(x => x.id === declineModal.id ? { ...x, status: 'rejected', _raw: { ...x._raw, rejectionReason: reason } } : x));
+      {declineModal && <DeclineOfferModal offer={declineModal} onClose={() => setDeclineModal(null)} onDeclined={() => {
         setDeclineModal(null);
+        loadOffers(); // the server closed the round; re-read instead of patching local state
       }} />}
 
       {newListingModal && (

@@ -71,18 +71,34 @@ export const setRegistrationToken = (token) => {
 export const clearRegistrationToken = () => setRegistrationToken(null);
 
 // ─── CORE FETCH ───────────────────────────────────────────────────────────────
+// Errors thrown from here carry machine-readable fields so screens can tell a
+// signed-out session (status 401) from a permission problem (403) from a
+// dead network (isNetwork) - see lib/errors.js. The message stays the same
+// human-readable string callers have always shown.
+function apiError(message, extra = {}) {
+  return Object.assign(new Error(message), extra);
+}
+
 async function apiFetch(path, options = {}) {
+  // multipart bodies must NOT get a JSON Content-Type: the browser has to
+  // add the multipart boundary itself.
+  const isForm = typeof FormData !== 'undefined' && options.body instanceof FormData;
   const headers = {
-    'Content-Type': 'application/json',
+    ...(isForm ? {} : { 'Content-Type': 'application/json' }),
     ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
     ...(options.headers || {}),
   };
 
-  const res = await fetch(`${BASE}${path}`, {
-    ...options,
-    headers,
-    credentials: 'include', // sends the httpOnly refresh cookie automatically
-  });
+  let res;
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      ...options,
+      headers,
+      credentials: 'include', // sends the httpOnly refresh cookie automatically
+    });
+  } catch {
+    throw apiError('Network problem — please check your connection and try again.', { isNetwork: true });
+  }
 
   // Try to refresh token on 401 (cookie-based — no token passed manually)
   if (res.status === 401 && !options._retry) {
@@ -102,7 +118,7 @@ async function apiFetch(path, options = {}) {
     // and by AuthContext's own silent-refresh-on-boot effect, so we just
     // throw here and let each call site's existing .catch() decide what
     // to do (WarehousePage already falls back to mock data, for example).
-    throw new Error('Unauthorized');
+    throw apiError('Unauthorized', { status: 401 });
   }
 
   const data = await res.json().catch(() => ({}));
@@ -111,7 +127,7 @@ async function apiFetch(path, options = {}) {
       data?.error?.message ||
       (Array.isArray(data?.message) ? data.message[0] : data?.message) ||
       `Request failed (${res.status})`;
-    throw new Error(message);
+    throw apiError(message, { status: res.status });
   }
   return data;
 }
@@ -333,11 +349,30 @@ export async function apiUploadProductMedia(productId, files, type = 'image') {
 }
 
 // ─── OFFERS ────────────────────────────────────────────────────────────────────
-export async function apiSubmitOffer({ productId, offeredPrice, quantity, message }) {
+// requestId: one id per "Send" intent (Idempotency-Key) so a retry can never create a second offer.
+export async function apiSubmitOffer({ productId, offeredPrice, quantity, message, paymentTerms, acceptTerms }, requestId) {
   return apiFetch('/offers', {
     method: 'POST',
-    body: JSON.stringify({ productId, offeredPrice, quantity, message }),
+    headers: requestId ? { 'Idempotency-Key': requestId } : {},
+    body: JSON.stringify({ productId, offeredPrice, quantity, message, paymentTerms, acceptTerms }),
   });
+}
+
+// Validate terms on the server and get the canonical form + summary + schedule.
+export async function apiPreviewPaymentTerms(paymentTerms, totalAmount) {
+  return apiFetch('/offers/terms/preview', { method: 'POST', body: JSON.stringify({ paymentTerms, totalAmount }) });
+}
+
+// Negotiation: either party answers the current round with a new proposal.
+export async function apiProposeRound(offerId, { price, quantity, paymentTerms, message, roundId }, requestId) {
+  return apiFetch(`/offers/${offerId}/rounds`, {
+    method: 'POST',
+    headers: requestId ? { 'Idempotency-Key': requestId } : {},
+    body: JSON.stringify({ price, quantity, paymentTerms, message, roundId }),
+  });
+}
+export async function apiGetOfferRounds(offerId) {
+  return apiFetch(`/offers/${offerId}/rounds`);
 }
 
 export async function apiGetReceivedOffers() {
@@ -355,8 +390,10 @@ export async function apiGetSentOffers() {
   return apiFetch('/offers/sent');
 }
 
-export async function apiAcceptOffer(offerId) {
-  return apiFetch(`/offers/${offerId}/accept`, { method: 'PATCH' });
+// body: { acceptTerms: true, roundId } - roundId is the round the person reviewed;
+// the server answers 409 if a newer round replaced it in the meantime.
+export async function apiAcceptOffer(offerId, body = {}) {
+  return apiFetch(`/offers/${offerId}/accept`, { method: 'PATCH', body: JSON.stringify(body) });
 }
 
 export async function apiRejectOffer(offerId, reason) {
@@ -368,8 +405,8 @@ export async function apiRejectOffer(offerId, reason) {
 
 // Buyer side of a negotiation: accept the seller's counter (order is created
 // at the counter price) or withdraw an open offer / decline a counter.
-export async function apiAcceptCounter(offerId) {
-  return apiFetch(`/offers/${offerId}/accept-counter`, { method: 'PATCH' });
+export async function apiAcceptCounter(offerId, body = {}) {
+  return apiFetch(`/offers/${offerId}/accept-counter`, { method: 'PATCH', body: JSON.stringify(body) });
 }
 
 export async function apiWithdrawOffer(offerId) {
@@ -381,6 +418,25 @@ export async function apiCounterOffer(offerId, { counterPrice, counterMessage })
     method: 'PATCH',
     body: JSON.stringify({ counterPrice, counterMessage }),
   });
+}
+
+// ─── SELLER INVOICES ───────────────────────────────────────────────────────────
+export async function apiSaleGetMyInvoices() { return apiFetch('/invoices/my'); }          // buyer: invoices addressed to me
+export async function apiGetIssuedInvoices() { return apiFetch('/invoices/issued'); }  // seller: invoices I issued
+export async function apiSaleGetInvoice(id) { return apiFetch(`/invoices/${id}`); }
+export async function apiIssueInvoice(orderId) { return apiFetch(`/invoices/order/${orderId}`, { method: 'POST' }); }
+export async function apiSubmitInvoicePayment(id, { reference, note }) {
+  return apiFetch(`/invoices/${id}/submit-payment`, { method: 'POST', body: JSON.stringify({ reference, note }) });
+}
+export async function apiSaleConfirmInvoicePayment(id) { return apiFetch(`/invoices/${id}/confirm-payment`, { method: 'POST' }); }
+export async function apiRejectInvoicePayment(id, reason) {
+  return apiFetch(`/invoices/${id}/reject-payment`, { method: 'POST', body: JSON.stringify({ reason }) });
+}
+export async function apiVoidInvoice(id, reason) {
+  return apiFetch(`/invoices/${id}/void`, { method: 'POST', body: JSON.stringify({ reason }) });
+}
+export async function apiReplaceInvoice(id, reason) {
+  return apiFetch(`/invoices/${id}/replace`, { method: 'POST', body: JSON.stringify({ reason }) });
 }
 
 // ─── ORDERS ────────────────────────────────────────────────────────────────────
@@ -465,8 +521,8 @@ export async function apiGetReceipt(id) {
   return apiFetch(`/warehouse/receipts/${id}`);
 }
 
-export async function apiApplyLien(data) {
-  return apiFetch('/warehouse/lien/apply', { method: 'POST', body: JSON.stringify(data) });
+export async function apiApplyLien(data, idemKey) {
+  return apiFetch('/warehouse/lien/apply', { method: 'POST', headers: idemKey ? { 'Idempotency-Key': idemKey } : undefined, body: JSON.stringify(data) });
 }
 
 export async function apiReleaseLien(lienId, note) {
@@ -528,16 +584,16 @@ export async function apiAdminGetListingDetail(type, id) {
   return apiFetch(`/admin-review/${type}/${id}`);
 }
 
-export async function apiBuyInsurance(data) {
-  return apiFetch('/warehouse/insurance/buy', { method: 'POST', body: JSON.stringify(data) });
+export async function apiBuyInsurance(data, idemKey) {
+  return apiFetch('/warehouse/insurance/buy', { method: 'POST', headers: idemKey ? { 'Idempotency-Key': idemKey } : undefined, body: JSON.stringify(data) });
 }
 
 export async function apiGetWarehouseDashboard(warehouseId) {
   return apiFetch(`/warehouse/dashboard/operator${warehouseId ? `?warehouseId=${warehouseId}` : ''}`);
 }
 
-export async function apiRegisterWarehouse(data) {
-  return apiFetch('/warehouse/register', { method: 'POST', body: JSON.stringify(data) });
+export async function apiRegisterWarehouse(data, idemKey) {
+  return apiFetch('/warehouse/register', { method: 'POST', headers: idemKey ? { 'Idempotency-Key': idemKey } : undefined, body: JSON.stringify(data) });
 }
 
 export async function apiUpdateWarehouse(id, data) {
@@ -554,9 +610,10 @@ export async function apiQuoteWarehouseRate(id, { commodity, quantityTons, durat
   return apiFetch(`/warehouse/${id}/quote?${qs}`);
 }
 
-export async function apiIssueReceipt(bookingId, { qualityMetrics, actualQuantityTons }) {
+export async function apiIssueReceipt(bookingId, { qualityMetrics, actualQuantityTons }, idemKey) {
   return apiFetch(`/warehouse/receipts/issue/${bookingId}`, {
     method: 'POST',
+    headers: idemKey ? { 'Idempotency-Key': idemKey } : undefined,
     body: JSON.stringify({ qualityMetrics, actualQuantityTons }),
   });
 }
@@ -632,9 +689,11 @@ export async function apiGetAgencies(params = {}) {
   return Array.isArray(res) ? res : res?.data || [];
 }
 
-export async function apiBookTesting({ agencyId, productId, orderId, servicesRequested, scheduledDate, sampleLocation, notes }) {
+// idemKey: one Idempotency-Key per submit intent (a retry can never create a second request).
+export async function apiBookTesting({ agencyId, productId, orderId, servicesRequested, scheduledDate, sampleLocation, notes }, idemKey) {
   return apiFetch('/testing/requests', {
     method: 'POST',
+    headers: idemKey ? { 'Idempotency-Key': idemKey } : undefined,
     body: JSON.stringify({ agencyId, productId, orderId, servicesRequested, scheduledDate, sampleLocation, notes }),
   });
 }
@@ -679,8 +738,13 @@ export async function apiGetTransporters(params = {}) {
   return Array.isArray(res) ? res : res?.data || [];
 }
 
-export async function apiCreateTransportRequest(data) {
-  return apiFetch('/transport/requests', { method: 'POST', body: JSON.stringify(data) });
+// Optional new fields: providerId (send straight to a transporter), deliveryDeadline, commodity, cargoType,
+// specialHandling, contactName, contactPhone (the server defaults contact to the requester's profile).
+// Empty values are dropped. Response carries requestRef (TRQ-).
+export async function apiCreateTransportRequest(data, requestId) {
+  const body = {};
+  Object.entries(data || {}).forEach(([k, v]) => { if (v !== undefined && v !== null && !(typeof v === 'string' && !v.trim())) body[k] = typeof v === 'string' ? v.trim() : v; });
+  return apiFetch('/transport/requests', { method: 'POST', headers: requestId ? { 'Idempotency-Key': requestId } : {}, body: JSON.stringify(body) });
 }
 
 export async function apiBookTransport({ requestId, providerId, agreedPrice }) {
@@ -698,10 +762,19 @@ export async function apiTrackShipment(requestId) {
   return apiFetch(`/transport/track/${requestId}`);
 }
 
-export async function apiUpdateTracking(requestId, data) {
+// DELIVERED requires receiverName (delivery evidence); deliveryNote / deliveredQuantityTons are optional.
+export async function apiUpdateTracking(requestId, data = {}) {
+  const body = { ...data };
+  if (body.status === 'DELIVERED') {
+    body.receiverName = (body.receiverName || '').trim();
+    if (!body.receiverName) throw new Error('Enter who received the goods before marking the shipment delivered.');
+    if (body.deliveryNote !== undefined) { body.deliveryNote = String(body.deliveryNote).trim() || undefined; }
+    if (body.deliveredQuantityTons !== undefined && body.deliveredQuantityTons !== '') body.deliveredQuantityTons = Number(body.deliveredQuantityTons);
+    else delete body.deliveredQuantityTons;
+  }
   return apiFetch(`/transport/requests/${requestId}/tracking`, {
     method: 'PATCH',
-    body: JSON.stringify(data),
+    body: JSON.stringify(body),
   });
 }
 
@@ -762,19 +835,21 @@ export async function apiGetClarifications(subjectType, subjectId) {
 }
 
 // files: array of File objects (optional)
-export async function apiRespondToClarification(clarificationId, responseMessage, files = []) {
+// clientRequestId: one id per "Send" intent. The server stores at most one
+// message per (clarification, id), so a retry or double-click can never
+// create a duplicate. Goes through apiFetch so an expired access token is
+// refreshed and the call retried exactly like every other request (the old
+// raw fetch skipped that, which is how a single reply could surface as an
+// "Unauthorized" error).
+export async function apiRespondToClarification(clarificationId, responseMessage, files = [], clientRequestId) {
   const formData = new FormData();
   formData.append('responseMessage', responseMessage);
   files.forEach(f => formData.append('attachments', f));
-  const res = await fetch(`${BASE}/review/clarifications/${clarificationId}/respond`, {
+  return apiFetch(`/review/clarifications/${clarificationId}/respond`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${getToken()}` },
-    credentials: 'include',
-    body: formData, // multipart — don't set Content-Type manually
+    headers: clientRequestId ? { 'Idempotency-Key': clientRequestId } : {},
+    body: formData, // multipart — apiFetch leaves Content-Type to the browser
   });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data?.error?.message || (Array.isArray(data?.message) ? data.message[0] : data?.message) || 'Could not send your response');
-  return data;
 }
 
 export async function apiResolveClarification(clarificationId) {
@@ -1025,19 +1100,79 @@ export async function apiGetPublicStats() {
   return apiFetch('/public/stats');
 }
 
-// Transport: quote → accept flow
-export async function apiQuoteTransport(requestId, { price, estimatedArrival, note }) {
-  return apiFetch(`/transport/requests/${requestId}/quote`, { method: 'PATCH', body: JSON.stringify({ price: Number(price), estimatedArrival: estimatedArrival || undefined, note: note || undefined }) });
+// Transport: quote rounds → accept → driver/tracking → acknowledge / dispute / invoice (Phase 3)
+const idem = (requestId) => (requestId ? { 'Idempotency-Key': requestId } : {});
+const tpath = (id, tail) => `/transport/requests/${id}/${tail}`;
+const send = (path, method, body, requestId) => apiFetch(path, { method, headers: idem(requestId), ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
+
+// Body for quote / counter rounds. Server computes totalPrice (base + charges); never send a total.
+function quoteBody({ price, additionalCharges, estimatedPickup, estimatedArrival, vehicleDetails, paymentTerms, conditions, validHours, note, roundId }) {
+  const charges = (additionalCharges || []).filter(c => c && String(c.label || '').trim() && Number(c.amount) > 0)
+    .map(c => ({ label: String(c.label).trim(), amount: Number(c.amount) }));
+  return {
+    price: Number(price),
+    additionalCharges: charges.length ? charges : undefined,
+    estimatedPickup: estimatedPickup || undefined,
+    estimatedArrival: estimatedArrival || undefined,
+    vehicleDetails: vehicleDetails || undefined,
+    paymentTerms: paymentTerms || undefined,
+    conditions: conditions || undefined,
+    validHours: validHours ? Number(validHours) : undefined,
+    note: note || undefined,
+    roundId: roundId || undefined,
+  };
 }
-export async function apiAcceptTransportQuote(requestId) {
-  return apiFetch(`/transport/requests/${requestId}/accept`, { method: 'PATCH' });
+// Provider sends / revises a quote. requestId = one Idempotency-Key per send intent.
+export async function apiQuoteTransport(requestId, body, idemKey) {
+  return send(tpath(requestId, 'quote'), 'PATCH', quoteBody(body), idemKey);
+}
+// Requester counters the provider's quote.
+export async function apiCounterTransportQuote(requestId, body, idemKey) {
+  return send(tpath(requestId, 'counter'), 'PATCH', quoteBody(body), idemKey);
+}
+// Either party accepts the OTHER party's CURRENT round. roundId is required (stale => 409);
+// acceptTerms must be true (the user ticked "I accept the price, payment terms and conditions").
+export async function apiAcceptTransportQuote(requestId, roundId, acceptTerms = true) {
+  return send(tpath(requestId, 'accept'), 'PATCH', { roundId, acceptTerms });
+}
+export async function apiRejectTransportQuote(requestId, reason) {
+  return send(tpath(requestId, 'reject-quote'), 'PATCH', { reason });
 }
 export async function apiDeclineTransportRequest(requestId, reason) {
-  return apiFetch(`/transport/requests/${requestId}/decline`, { method: 'PATCH', body: JSON.stringify({ reason }) });
+  return send(tpath(requestId, 'decline'), 'PATCH', { reason });
 }
-export async function apiCancelTransportRequest(requestId) {
-  return apiFetch(`/transport/requests/${requestId}/cancel`, { method: 'PATCH' });
+export async function apiCancelTransportRequest(requestId, reason) {
+  return send(tpath(requestId, 'cancel'), 'PATCH', reason ? { reason } : {});
 }
+export async function apiAcknowledgeTransportDelivery(requestId, note) {
+  return send(tpath(requestId, 'acknowledge'), 'POST', note ? { note } : {});
+}
+export async function apiGetTransportRequest(requestId) { return apiFetch(`/transport/requests/${requestId}`); }
+
+// Disputes
+export async function apiRaiseTransportDispute(requestId, { category, description, claimAmount }, idemKey) {
+  return send(`/transport/disputes/request/${requestId}`, 'POST', { category, description, claimAmount: claimAmount ? Number(claimAmount) : undefined }, idemKey);
+}
+export async function apiRespondTransportDispute(id, response) { return send(`/transport/disputes/${id}/respond`, 'POST', { response }); }
+export async function apiWithdrawTransportDispute(id) { return send(`/transport/disputes/${id}/withdraw`, 'POST', {}); }
+export async function apiAdminGetTransportDisputes() { return apiFetch('/transport/admin/disputes'); }
+export async function apiAdminResolveTransportDispute(id, { outcome, note }) {
+  return send(`/transport/admin/disputes/${id}/resolve`, 'POST', { outcome, note });
+}
+
+// Transport invoices (provider -> requester)
+export async function apiTransportInvoicesMine() { return apiFetch('/transport-invoices/my'); }
+export async function apiTransportInvoicesIssued() { return apiFetch('/transport-invoices/issued'); }
+export async function apiTransportInvoicesForRequest(requestId) { return apiFetch(`/transport-invoices/request/${requestId}`); }
+export async function apiGetTransportInvoice(id) { return apiFetch(`/transport-invoices/${id}`); }
+export async function apiIssueTransportInvoice(requestId) { return send(`/transport-invoices/request/${requestId}`, 'POST', {}); }
+export async function apiSubmitTransportInvoicePayment(id, { reference, note }) {
+  return send(`/transport-invoices/${id}/submit-payment`, 'POST', { reference, note });
+}
+export async function apiConfirmTransportInvoicePayment(id) { return send(`/transport-invoices/${id}/confirm-payment`, 'POST', {}); }
+export async function apiRejectTransportInvoicePayment(id, reason) { return send(`/transport-invoices/${id}/reject-payment`, 'POST', { reason }); }
+export async function apiVoidTransportInvoice(id, reason) { return send(`/transport-invoices/${id}/void`, 'POST', { reason }); }
+export async function apiReplaceTransportInvoice(id, reason) { return send(`/transport-invoices/${id}/replace`, 'POST', { reason }); }
 
 // Lab report file (permanent storage; a fresh signed link is minted per download)
 export async function apiUploadTestingReportFile(requestId, file) {

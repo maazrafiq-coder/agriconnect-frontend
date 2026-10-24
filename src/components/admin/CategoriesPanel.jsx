@@ -9,12 +9,15 @@ import {
 import { Card, Btn, Badge, Modal } from '../ui';
 import T from '../../theme';
 import { inputStyle } from './shared';
+import useConfirm from '../ui/useConfirm';
+import { notify } from '../../lib/notify';
 
 // ─── CATEGORIES PANEL ───────────────────────────────────────────────────────
 // This is the actual "add a new category like Pulses" feature. Categories
 // are real database rows now, not a hardcoded enum — admins can add,
 // rename, or deactivate them here without any code deploy.
 export function CategoriesPanel() {
+  const [confirmNode, confirm] = useConfirm();
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [addModal, setAddModal] = useState(false);
@@ -29,6 +32,7 @@ export function CategoriesPanel() {
 
   return (
     <div>
+      {confirmNode}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <p style={{ fontSize: 12, color: T.muted, margin: 0 }}>
           {categories.length} categories · {categories.filter(c => c.isActive).length} active
@@ -56,19 +60,23 @@ export function CategoriesPanel() {
             <div style={{ display: 'flex', gap: 6 }}>
               <Btn variant="secondary" size="sm" onClick={() => setEditModal(c)}>Edit</Btn>
               {c.isActive ? (
-                <Btn variant="danger" size="sm" onClick={async () => {
-                  try {
+                <Btn variant="danger" size="sm" onClick={() => confirm({
+                  title: `Deactivate category - ${c.name}`, danger: true, confirmLabel: 'Deactivate',
+                  description: `Deactivate "${c.name}"?${c.activeProductCount ? ` It has ${c.activeProductCount} active listing${c.activeProductCount === 1 ? '' : 's'}.` : ''}`,
+                  consequences: ['It can no longer be chosen on new listings.', 'You can reactivate it later.'],
+                  run: async () => {
                     const result = await apiAdminDeactivateCategory(c.id);
-                    if (result.warning) alert(result.warning);
+                    if (result.warning) notify(result.warning);
                     setCategories(prev => prev.map(x => x.id === c.id ? { ...x, isActive: false } : x));
-                  } catch (e) { alert(e.message); }
-                }}>Deactivate</Btn>
+                  },
+                  successTitle: 'Category deactivated',
+                })}>Deactivate</Btn>
               ) : (
                 <Btn variant="secondary" size="sm" onClick={async () => {
                   try {
                     await apiAdminReactivateCategory(c.id);
                     setCategories(prev => prev.map(x => x.id === c.id ? { ...x, isActive: true } : x));
-                  } catch (e) { alert(e.message); }
+                  } catch (e) { notify(e.message); }
                 }}>Reactivate</Btn>
               )}
             </div>

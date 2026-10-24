@@ -1,5 +1,5 @@
 import T from '../../theme';
-import { Modal as UIModal, Tabs } from '../ui';
+import { Modal as UIModal, Tabs, InfoRow as UIInfoRow } from '../ui';
 
 // Demo/sample data is only ever shown when explicitly enabled — never as a
 // silent substitute for a failed API call. See P0 #10 (misleading mock
@@ -41,12 +41,8 @@ export const StatusPill = ({ status }) => {
 
 export const Stars = ({ r }) => <span style={{color:T.goldText,fontSize:12}}>{'★'.repeat(Math.round(r))}{'☆'.repeat(5-Math.round(r))} <span style={{color:T.muted,fontSize:11}}>{r}</span></span>;
 
-export const InfoRow = ({ label, value, accent }) => (
-  <div style={{display:'flex',justifyContent:'space-between',padding:'8px 0',borderBottom:`1px solid ${T.border}`}}>
-    <span style={{fontSize:12,color:T.muted}}>{label}</span>
-    <span style={{fontSize:12,fontWeight:700,color:accent||T.text}}>{value}</span>
-  </div>
-);
+// Shared with every request/confirmation flow (components/ui).
+export const InfoRow = UIInfoRow;
 
 // Shared tab strip (role=tablist, arrow-key navigation) lives in components/ui.
 export const TabBar = (props) => <Tabs {...props} />;

@@ -5,6 +5,7 @@ import { Modal, Btn } from '../ui';
 import { apiRegister, apiVerifyOtp, apiLogin, apiSubmitKyc, apiResendOtp, apiForgotPassword, apiResetPassword, getRegistrationToken, clearRegistrationToken } from '../../lib/api';
 import { adaptUser } from '../../lib/adapters';
 import { portalPathForRole } from '../../lib/roles';
+import { landingPathAfterLogin } from '../../lib/access';
 import T from '../../theme';
 import { clickable } from '../../lib/a11y';
 
@@ -37,7 +38,7 @@ export function LoginModal() {
       // duplicated here as a local SELLER_ROLES array that only handled
       // buyer/seller/admin and silently dropped every operator role
       // (warehouse, testing agency, transporter) onto the buyer portal.
-      navigate(portalPathForRole(adapted.role));
+      navigate(landingPathAfterLogin(adapted, portalPathForRole(adapted.role)));
     } catch (err) {
       setError(err.message || 'Login failed. Check your credentials.');
     } finally {
@@ -84,6 +85,7 @@ const markStep = (v) => { try { v ? sessionStorage.setItem(STEP_KEY, v) : sessio
 export function RegisterModal() {
   const { closeModal, openLogin } = useAuth();
   const [step, setStep]         = useState(readResumeStep);
+  const [reviewing, setReviewing] = useState(false); // review screen between the form and the OTP
   const [resendIn, setResendIn] = useState(0);
   const [info, setInfo]         = useState('');
   const [role, setRole]         = useState('buyer');
@@ -118,11 +120,16 @@ export function RegisterModal() {
     warehouse: 'WAREHOUSE',
   };
 
-  const handleRegister = async () => {
+  const goReview = () => {
     if (!form.fullName || (!form.phone && !form.email) || !form.password) {
       setError('Full name, password, and at least one of phone/email are required');
       return;
     }
+    setError('');
+    setReviewing(true);
+  };
+
+  const handleRegister = async () => {
     setError('');
     setLoading(true);
     try {
@@ -135,6 +142,7 @@ export function RegisterModal() {
       });
       if (result.devOtp) setDevOtp(result.devOtp);
       setRegisteredIdentifier(result.identifier || form.phone || form.email);
+      setReviewing(false);
       setStep(2);
     } catch (err) {
       setError(err.message || 'Registration failed');
@@ -217,8 +225,8 @@ export function RegisterModal() {
   };
 
   return (
-    <Modal title={['', 'Create Account', 'Verify Contact', 'Upload Documents', 'Registration Submitted'][step]} onClose={closeModal} closeOnBackdrop={false}>
-      {step === 1 && (
+    <Modal title={['', reviewing ? 'Review Your Details' : 'Create Account', 'Verify Contact', 'Upload Documents', 'Registration Submitted'][step]} onClose={closeModal} closeOnBackdrop={false}>
+      {step === 1 && !reviewing && (
         <>
           <div style={{ marginBottom: 14 }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: T.muted, marginBottom: 8 }}>I WANT TO</div>
@@ -269,9 +277,36 @@ export function RegisterModal() {
               style={inputStyle} />
           </div>
           {error && <div style={{ fontSize: 12, color: T.danger, marginBottom: 10, background: '#FEE2E2', padding: '8px 12px', borderRadius: 7 }}>⚠ {error}</div>}
-          <Btn variant="primary" style={{ width: '100%', padding: '11px' }} onClick={handleRegister} disabled={loading}>
-            {loading ? 'Sending OTP…' : 'Send OTP →'}
+          <Btn variant="primary" style={{ width: '100%', padding: '11px' }} onClick={goReview}>
+            Review →
           </Btn>
+        </>
+      )}
+
+      {step === 1 && reviewing && (
+        <>
+          <p style={{ color: T.muted, fontSize: 13, margin: '0 0 12px' }}>Check these details before we send you a verification code.</p>
+          <div style={{ background: T.surface, borderRadius: 10, padding: '4px 14px', marginBottom: 12 }}>
+            {[
+              ['Account type', role === 'seller' ? `Seller (${sellerKind.toLowerCase()})` : ({ buyer: 'Buyer', transporter: 'Transporter', testing_agency: 'Testing agency', warehouse: 'Warehouse operator' }[role] || role)],
+              ['Full name', form.fullName],
+              ['Phone', form.phone || 'Not provided'],
+              ['Email', form.email || 'Not provided'],
+              ['Password', 'Hidden - you will use it to log in'],
+            ].map(([l, v]) => (
+              <div key={l} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '8px 0', borderBottom: `1px solid ${T.border}`, fontSize: 13 }}>
+                <span style={{ color: T.muted }}>{l}</span><span style={{ fontWeight: 600, textAlign: 'right', wordBreak: 'break-word' }}>{v}</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ background: '#FEF3C7', borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 12, color: '#92400E', lineHeight: 1.55 }}>
+            We will send a 6-digit code to verify your contact. After that, your account is reviewed by AgriConnect before you can log in.
+          </div>
+          {error && <div role="alert" style={{ fontSize: 12, color: T.danger, marginBottom: 10, background: '#FEE2E2', padding: '8px 12px', borderRadius: 7 }}>⚠ {error}</div>}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 8 }}>
+            <Btn variant="ghost" onClick={() => { setError(''); setReviewing(false); }} disabled={loading}>← Back</Btn>
+            <Btn variant="primary" onClick={handleRegister} disabled={loading}>{loading ? 'Sending code…' : 'Confirm & send code'}</Btn>
+          </div>
         </>
       )}
 

@@ -1,7 +1,10 @@
 import { apiChangeProductStatus, apiDeleteProduct } from '../../lib/api';
 import { Card, Btn, Badge, LoadingState, ErrorState } from '../ui';
+import ConfirmDialog from '../ui/ConfirmDialog';
+import { useState } from 'react';
 import T from '../../theme';
 
+import { useApprovalGate } from '../../context/ApprovalGate';
 export const LISTING_STATUS = {
   ACTIVE:          { label: 'Active',            type: 'green' },
   PENDING_REVIEW:  { label: 'Pending Review',     type: 'gold'  },
@@ -14,14 +17,32 @@ export const LISTING_STATUS = {
 
 // ─── SellerListingsTab ───
 export function SellerListingsTab({ navigate, setNewListingModal, setEditListing, setMediaModalProduct, myListings, setMyListings, listingsState, loadListings }) {
+  const gate = useApprovalGate();
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [actionError, setActionError] = useState('');
   return (
     <div>
+      {actionError && <div role="alert" style={{ color: T.danger, fontSize: 12, marginBottom: 10 }}>{actionError}</div>}
+      {deleteTarget && (
+        <ConfirmDialog
+          title="Delete listing" danger confirmLabel="Delete listing"
+          description={`Delete "${deleteTarget.name || deleteTarget.title || 'this listing'}"?`}
+          consequences={['Listings with existing offers are archived instead of deleted, to keep their history.']}
+          onConfirm={async () => {
+            const p = deleteTarget;
+            const result = await apiDeleteProduct(p._raw?.id || p.id);
+            if (result?.archived) setMyListings(prev => prev.map(x => x.id === p.id ? { ...x, status: 'REMOVED' } : x));
+            else setMyListings(prev => prev.filter(x => x.id !== p.id));
+          }}
+          onClose={() => setDeleteTarget(null)}
+        />
+      )}
       {listingsState === 'loading' && <LoadingState label="Loading your listings…" />}
       {listingsState === 'error' && <ErrorState message="Could not load your listings." onRetry={loadListings} />}
       {listingsState === 'ready' && (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(250px,1fr))', gap: 14 }}>
       {myListings.map(p => (
-        <Card key={p.id} style={{ padding: 0, overflow: 'hidden' }}>
+        <div key={p.id} data-focus-id={p.id}><Card style={{ padding: 0, overflow: 'hidden' }}>
           <div style={{ height: 90, background: p.images?.[0] ? `url(${p.images[0]}) center/cover no-repeat` : 'linear-gradient(135deg,#74C69D22,#B7A05A22)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 36, position: 'relative' }}>
             {!p.images?.[0] && '🌾'}
             <div style={{ position: 'absolute', top: 8, right: 8 }}>
@@ -54,30 +75,18 @@ export function SellerListingsTab({ navigate, setNewListingModal, setEditListing
                   try {
                     await apiChangeProductStatus(p._raw?.id || p.id, p.status === 'PAUSED' ? 'ACTIVE' : 'PAUSED');
                     setMyListings(prev => prev.map(x => x.id === p.id ? { ...x, status: x.status === 'PAUSED' ? 'ACTIVE' : 'PAUSED' } : x));
-                  } catch (e) { alert(e.message || 'Could not update listing status'); }
+                  } catch (e) { setActionError(e.message || 'Could not update listing status'); }
                 }}>{p.status === 'PAUSED' ? 'Resume' : 'Pause'}</Btn>
               )}
               {p.status !== 'SOLD' && (
-                <Btn variant="danger" size="sm" onClick={async () => {
-                  if (!confirm('Delete this listing? This cannot be undone.')) return;
-                  try {
-                    const result = await apiDeleteProduct(p._raw?.id || p.id);
-                    if (result?.archived) {
-                      // Had existing offers — backend archived it (REMOVED)
-                      // instead of a hard delete, to preserve that history.
-                      setMyListings(prev => prev.map(x => x.id === p.id ? { ...x, status: 'REMOVED' } : x));
-                    } else {
-                      setMyListings(prev => prev.filter(x => x.id !== p.id));
-                    }
-                  } catch (e) { alert(e.message || 'Could not delete listing'); }
-                }}>🗑️ Delete</Btn>
+                <Btn variant="danger" size="sm" onClick={() => setDeleteTarget(p)}>🗑️ Delete</Btn>
               )}
             </div>
           </div>
-        </Card>
+        </Card></div>
       ))}
       <Card
-        onClick={() => setNewListingModal(true)}
+        onClick={gate(() => setNewListingModal(true), 'create a listing')}
         style={{ border: `2px dashed ${T.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 180, cursor: 'pointer' }}
       >
         <div style={{ textAlign: 'center', color: T.muted }}>

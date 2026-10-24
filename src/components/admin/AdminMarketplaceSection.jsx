@@ -5,11 +5,15 @@ import T from '../../theme';
 import { Pager } from './Pager';
 import { CategoriesPanel } from './CategoriesPanel';
 import { clickable } from '../../lib/a11y';
+import useConfirm from '../ui/useConfirm';
+import { notify } from '../../lib/notify';
 
 // ─── AdminMarketplaceSection ───
 export function AdminMarketplaceSection({ subTab, setSubTab, orderStatusFilter, setOrderStatusFilter, products, setProducts, productsMeta, productPage, setProductPage, productStatus, setProductStatus, productsLoading, orders, loading, setAsk, setListingDetail, setRemoveModal, loadAll }) {
+  const [confirmNode, confirm] = useConfirm();
   return (
     <div>
+      {confirmNode}
       <h1 style={{ fontSize: 20, fontWeight: 900, color: T.green, margin: '0 0 4px' }}>🌾 Marketplace Management</h1>
       <p style={{ fontSize: 13, color: T.muted, margin: '0 0 16px' }}>Products · Categories · Orders</p>
 
@@ -70,13 +74,17 @@ export function AdminMarketplaceSection({ subTab, setSubTab, orderStatusFilter, 
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                 {p.status === 'PENDING_REVIEW' && (
                   <>
-                    <Btn variant="primary" size="sm" onClick={async () => {
-                      try {
+                    <Btn variant="primary" size="sm" onClick={() => confirm({
+                      title: `Approve listing - ${p.name}`, confirmLabel: 'Approve listing',
+                      description: `Publish "${p.name}" to the marketplace?`,
+                      consequences: ['The listing becomes visible to buyers.', 'The seller is notified.'],
+                      run: async () => {
                         await apiAdminApproveProduct(p.id);
                         setProducts(prev => prev.map(x => x.id === p.id ? { ...x, status: 'ACTIVE' } : x));
-                      loadAll();
-                      } catch (e) { alert(e.message); }
-                    }}>✅ Approve</Btn>
+                        loadAll();
+                      },
+                      successTitle: 'Listing approved',
+                    })}>✅ Approve</Btn>
                     <Btn variant="danger" size="sm" onClick={() => setAsk({
                       title: `Reject listing — ${p.name}`,
                       label: 'Reason for rejecting this listing (shown to the seller)',
@@ -92,12 +100,16 @@ export function AdminMarketplaceSection({ subTab, setSubTab, orderStatusFilter, 
                 {p.status !== 'REMOVED' && p.status !== 'PENDING_REVIEW' ? (
                   <Btn variant="danger" size="sm" onClick={() => setRemoveModal(p)}>Remove</Btn>
                 ) : p.status === 'REMOVED' ? (
-                  <Btn variant="secondary" size="sm" onClick={async () => {
-                    try {
+                  <Btn variant="secondary" size="sm" onClick={() => confirm({
+                    title: `Restore listing - ${p.name}`, confirmLabel: 'Restore listing',
+                    description: `Put "${p.name}" back on the marketplace?`,
+                    consequences: ['The listing becomes visible to buyers again.'],
+                    run: async () => {
                       await apiAdminRestoreProduct(p.id);
                       setProducts(prev => prev.map(x => x.id === p.id ? { ...x, status: 'ACTIVE' } : x));
-                    } catch (e) { alert(e.message); }
-                  }}>Restore</Btn>
+                    },
+                    successTitle: 'Listing restored',
+                  })}>Restore</Btn>
                 ) : null}
               </div>
             </Card>

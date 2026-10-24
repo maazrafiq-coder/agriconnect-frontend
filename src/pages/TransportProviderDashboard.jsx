@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  apiGetMyProvider, apiRegisterProvider, apiUpdateMyProvider, apiUpdateTracking, apiQuoteTransport, apiDeclineTransportRequest,
+  apiGetMyProvider, apiRegisterProvider, apiUpdateMyProvider, apiGetMyTransportRequests,
   apiGetMyProviderClarifications, apiRespondToClarification,
 } from '../lib/api';
-import { Card, Btn, Badge, Modal, LoadingState } from '../components/ui';
+import { adaptTransportRequests } from '../lib/adapters';
+import TransportRequestCard from '../components/TransportRequestCard';
+import { Card, Btn, LoadingState } from '../components/ui';
 import MediaManagerModal from '../components/MediaManager';
 import ClarificationThread from '../components/ClarificationThread';
 import T from '../theme';
@@ -19,12 +21,6 @@ const VEHICLE_TYPES = [
   ['SMALL_TRUCK', 'Small Truck'], ['MEDIUM_TRUCK', 'Medium Truck'], ['LARGE_TRUCK', 'Large Truck'],
   ['CONTAINER', 'Container'], ['BULK_CARGO', 'Bulk Cargo'], ['REFRIGERATED', 'Refrigerated'],
 ];
-const STATUS_FLOW = ['BOOKED', 'PICKED_UP', 'IN_TRANSIT', 'DELIVERED'];
-const STATUS_BADGE = {
-  REQUESTED: 'gold', QUOTED: 'gold', BOOKED: 'blue', PICKED_UP: 'blue',
-  IN_TRANSIT: 'blue', DELIVERED: 'green', CANCELLED: 'red',
-};
-const statusLabel = (s) => (s || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 
 // ─── REGISTER FORM ───────────────────────────────────────────────────────────
 function RegisterProviderForm({ onRegistered, initial, onCancel }) {
@@ -145,132 +141,6 @@ function RegisterProviderForm({ onRegistered, initial, onCancel }) {
   );
 }
 
-// ─── UPDATE TRACKING MODAL ───────────────────────────────────────────────────
-function UpdateTrackingModal({ request, onClose, onUpdated }) {
-  const idx = STATUS_FLOW.indexOf(request.status);
-  const next = STATUS_FLOW[idx + 1];
-  const [currentLocation, setLocation] = useState(request.currentLocation || '');
-  const [driverName, setDriverName] = useState(request.driverName || '');
-  const [driverPhone, setDriverPhone] = useState(request.driverPhone || '');
-  const [eta, setEta] = useState(request.estimatedArrival ? new Date(request.estimatedArrival).toISOString().slice(0, 16) : '');
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-
-  const submit = async (advance) => {
-    setError('');
-    setBusy(true);
-    try {
-      const data = { currentLocation, driverName, driverPhone };
-      if (eta) data.estimatedArrival = new Date(eta).toISOString();
-      if (advance && next) data.status = next;
-      await apiUpdateTracking(request.id, data);
-      onUpdated();
-    } catch (err) {
-      setError(err.message || 'Could not update tracking.');
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Modal title="Update Shipment Tracking" onClose={onClose}>
-      <p style={{ fontSize: 12.5, color: T.muted, marginBottom: 16 }}>
-        {request.pickupCity} → {request.deliveryCity} · Currently <strong>{statusLabel(request.status)}</strong>
-      </p>
-      <div style={{ marginBottom: 12 }}>
-        <label htmlFor="transportproviderdashboard-f5" style={labelStyle}>CURRENT LOCATION</label>
-        <input id="transportproviderdashboard-f5" style={inputStyle} value={currentLocation} onChange={e => setLocation(e.target.value)} placeholder="e.g. Approaching Gujranwala" />
-      </div>
-      <div style={{ marginBottom: 12 }}>
-        <label htmlFor="transportproviderdashboard-f6" style={labelStyle}>ESTIMATED ARRIVAL</label>
-        <input id="transportproviderdashboard-f6" type="datetime-local" style={inputStyle} value={eta} onChange={e => setEta(e.target.value)} />
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))', gap: 10, marginBottom: 16 }}>
-        <div>
-          <label htmlFor="transportproviderdashboard-f7" style={labelStyle}>DRIVER NAME</label>
-          <input id="transportproviderdashboard-f7" style={inputStyle} value={driverName} onChange={e => setDriverName(e.target.value)} />
-        </div>
-        <div>
-          <label htmlFor="transportproviderdashboard-f8" style={labelStyle}>DRIVER PHONE</label>
-          <input id="transportproviderdashboard-f8" style={inputStyle} value={driverPhone} onChange={e => setDriverPhone(e.target.value)} />
-        </div>
-      </div>
-      {error && <p style={{ color: T.danger, fontSize: 12, marginBottom: 12 }}>{error}</p>}
-      <div style={{ display: 'flex', gap: 10 }}>
-        <Btn variant="ghost" onClick={() => submit(false)} disabled={busy} style={{ flex: 1 }}>
-          {busy ? '…' : 'Save Details'}
-        </Btn>
-        {next && (
-          <Btn variant="primary" onClick={() => submit(true)} disabled={busy} style={{ flex: 1 }}>
-            {busy ? '…' : `Mark ${statusLabel(next)}`}
-          </Btn>
-        )}
-      </div>
-    </Modal>
-  );
-}
-
-// ─── QUOTE / DECLINE MODAL ───────────────────────────────────────────────────
-function QuoteModal({ request, onClose, onDone }) {
-  const [price, setPrice] = useState(request.quotedPrice ? String(Number(request.quotedPrice)) : '');
-  const [eta, setEta] = useState('');
-  const [note, setNote] = useState(request.quoteNote || '');
-  const [declining, setDeclining] = useState(false);
-  const [reason, setReason] = useState('');
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-
-  const send = async () => {
-    setError('');
-    if (!(Number(price) > 0)) return setError('Enter a price greater than zero.');
-    setBusy(true);
-    try {
-      await apiQuoteTransport(request.id, { price, estimatedArrival: eta ? new Date(eta).toISOString() : undefined, note });
-      onDone();
-    } catch (e) { setError(e.message || 'Could not send the quote.'); setBusy(false); }
-  };
-  const decline = async () => {
-    setError('');
-    if (reason.trim().length < 5) return setError('Please give a short reason (at least 5 characters).');
-    setBusy(true);
-    try { await apiDeclineTransportRequest(request.id, reason.trim()); onDone(); }
-    catch (e) { setError(e.message || 'Could not decline.'); setBusy(false); }
-  };
-
-  return (
-    <Modal title={declining ? 'Decline Request' : 'Send a Quote'} onClose={onClose}>
-      <p style={{ fontSize: 12.5, color: T.muted, marginBottom: 14 }}>
-        {request.pickupCity} → {request.deliveryCity}
-        {request.cargoDescription ? ` · ${request.cargoDescription}` : ''}{request.cargoWeightTons ? ` · ${request.cargoWeightTons} t` : ''}
-        {request.requiredDate ? ` · needed ${new Date(request.requiredDate).toLocaleDateString('en-PK')}` : ''}
-      </p>
-      {!declining ? (<>
-        <div style={{ marginBottom: 12 }}>
-          <label htmlFor="transportproviderdashboard-f9" style={labelStyle}>TOTAL PRICE (₨)</label>
-          <input id="transportproviderdashboard-f9" type="number" min="1" style={inputStyle} value={price} onChange={e => setPrice(e.target.value)} />
-        </div>
-        <div style={{ marginBottom: 12 }}>
-          <label htmlFor="transportproviderdashboard-f10" style={labelStyle}>ESTIMATED ARRIVAL (OPTIONAL)</label>
-          <input id="transportproviderdashboard-f10" type="datetime-local" style={inputStyle} value={eta} onChange={e => setEta(e.target.value)} />
-        </div>
-        <div style={{ marginBottom: 14 }}>
-          <label htmlFor="transportproviderdashboard-f11" style={labelStyle}>NOTE TO CUSTOMER (OPTIONAL)</label>
-          <textarea id="transportproviderdashboard-f11" rows={2} style={inputStyle} value={note} onChange={e => setNote(e.target.value)} placeholder="e.g. includes loading, excludes tolls" />
-        </div>
-      </>) : (
-        <div style={{ marginBottom: 14 }}>
-          <label htmlFor="transportproviderdashboard-f12" style={labelStyle}>REASON</label>
-          <textarea id="transportproviderdashboard-f12" rows={3} style={inputStyle} value={reason} onChange={e => setReason(e.target.value)} placeholder="e.g. No vehicle available on those dates" />
-        </div>
-      )}
-      {error && <p style={{ color: T.danger, fontSize: 12, marginBottom: 12 }}>{error}</p>}
-      <div style={{ display: 'flex', gap: 10 }}>
-        <Btn variant="ghost" disabled={busy} style={{ flex: 1 }} onClick={() => { setDeclining(d => !d); setError(''); }}>{declining ? 'Back' : 'Decline'}</Btn>
-        <Btn variant="primary" disabled={busy} style={{ flex: 1 }} onClick={declining ? decline : send}>{busy ? '…' : declining ? 'Decline request' : 'Send quote'}</Btn>
-      </div>
-    </Modal>
-  );
-}
-
 // ─── MAIN DASHBOARD ──────────────────────────────────────────────────────────
 export default function TransportProviderDashboard() {
   const navigate = useNavigate();
@@ -278,8 +148,8 @@ export default function TransportProviderDashboard() {
   const [notFound, setNotFound] = useState(false);
   const [data, setData] = useState(null);
   const [mediaOpen, setMediaOpen] = useState(false);
-  const [trackingRequest, setTrackingRequest] = useState(null);
-  const [quoteRequest, setQuoteRequest] = useState(null);
+  const [shipments, setShipments] = useState([]);
+  const [shipmentsState, setShipmentsState] = useState('loading');
   const [editing, setEditing] = useState(false);
   const [clarifications, setClarifications] = useState([]);
 
@@ -289,15 +159,22 @@ export default function TransportProviderDashboard() {
       .catch(() => {});
   };
 
-  const handleRespondToClarification = async (id, message, files) => {
-    await apiRespondToClarification(id, message, files);
+  const handleRespondToClarification = async (id, message, files, reqId) => {
+    const saved = await apiRespondToClarification(id, message, files, reqId);
     loadClarifications();
+    return saved;
   };
 
+  // Shaped requests (rounds, turn, driver, invoice, disputes) for the shipment cards.
+  const loadShipments = () => {
+    apiGetMyTransportRequests('provider')
+      .then(d => { setShipments(adaptTransportRequests(Array.isArray(d) ? d : [])); setShipmentsState('ready'); })
+      .catch(() => setShipmentsState('error'));
+  };
   const load = () => {
     setLoading(true);
     apiGetMyProvider()
-      .then(setData)
+      .then(d => { setData(d); loadShipments(); })
       .catch(() => setNotFound(true))
       .finally(() => setLoading(false));
   };
@@ -317,7 +194,7 @@ export default function TransportProviderDashboard() {
     );
   }
 
-  const { provider, stats, recentRequests } = data;
+  const { provider, stats } = data;
 
   if (editing) {
     return (
@@ -362,31 +239,16 @@ export default function TransportProviderDashboard() {
         </div>
 
         <h3 style={{ fontSize: 14, fontWeight: 800, color: T.green, marginBottom: 12 }}>Shipments</h3>
-        {recentRequests.length === 0 ? (
-          <Card><p style={{ fontSize: 13, color: T.muted, margin: 0 }}>No shipments yet — they'll show up here once a customer sends you a request.</p></Card>
-        ) : (
-          <div style={{ display: 'grid', gap: 10 }}>
-            {recentRequests.map(r => (
-              <Card key={r.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: T.text }}>{r.pickupCity} → {r.deliveryCity}</div>
-                  <div style={{ fontSize: 11.5, color: T.muted, marginTop: 2 }}>
-                    {r.requester?.profile?.fullName || 'Requester'} · {r.cargoWeightTons ? `${r.cargoWeightTons} tons` : ''} {r.agreedPrice ? `· Agreed ₨${Number(r.agreedPrice).toLocaleString()}` : r.quotedPrice ? `· Quoted ₨${Number(r.quotedPrice).toLocaleString()}` : ''}
-                  </div>
-                </div>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <Badge label={statusLabel(r.status)} type={STATUS_BADGE[r.status] || 'gray'} />
-                  {(r.status === 'REQUESTED' || r.status === 'QUOTED') && (
-                    <Btn variant="primary" size="sm" onClick={() => setQuoteRequest(r)}>{r.status === 'QUOTED' ? 'Revise Quote' : 'Send Quote'}</Btn>
-                  )}
-                  {['BOOKED', 'PICKED_UP', 'IN_TRANSIT'].includes(r.status) && (
-                    <Btn variant="secondary" size="sm" onClick={() => setTrackingRequest(r)}>Update Tracking</Btn>
-                  )}
-                </div>
-              </Card>
-            ))}
-          </div>
+        {shipmentsState === 'loading' && <LoadingState label="Loading shipments…" />}
+        {shipmentsState === 'error' && (
+          <Card><p style={{ fontSize: 13, color: T.danger, margin: 0 }}>Could not load your shipments. <Btn variant="ghost" size="sm" onClick={loadShipments}>Retry</Btn></p></Card>
         )}
+        {shipmentsState === 'ready' && shipments.length === 0 && (
+          <Card><p style={{ fontSize: 13, color: T.muted, margin: 0 }}>No shipments yet — they'll show up here once a customer sends you a request.</p></Card>
+        )}
+        {shipmentsState === 'ready' && shipments.map(r => (
+          <div key={r.id} data-focus-id={r.id}><TransportRequestCard r={r} role="PROVIDER" onChanged={() => { loadShipments(); apiGetMyProvider().then(setData).catch(() => {}); }} /></div>
+        ))}
 
         {clarifications.length > 0 && (
           <>
@@ -410,17 +272,6 @@ export default function TransportProviderDashboard() {
         />
       )}
 
-      {quoteRequest && (
-        <QuoteModal request={quoteRequest} onClose={() => setQuoteRequest(null)} onDone={() => { setQuoteRequest(null); load(); }} />
-      )}
-
-      {trackingRequest && (
-        <UpdateTrackingModal
-          request={trackingRequest}
-          onClose={() => setTrackingRequest(null)}
-          onUpdated={() => { setTrackingRequest(null); load(); }}
-        />
-      )}
     </div>
   );
 }
